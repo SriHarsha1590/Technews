@@ -1,0 +1,31 @@
+{
+  "name": "@technews/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Temporal worker: ingest feeds, group and summarize stories, build ranked feeds",
+  "scripts": {
+    "worker": "tsx --env-file-if-exists=../../.env src/worker.ts",
+    "run-once": "tsx --env-file-if-exists=../../.env src/run-once.ts",
+    "schedules": "tsx --env-file-if-exists=../../.env src/schedules.ts",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@google/genai": "~2.30.0",
+    "@technews/shared": "*",
+    "@temporalio/activity": "~1.24.0",
+    "@temporalio/client": "~1.24.0",
+    "@temporalio/envconfig": "~1.24.0",
+    "@temporalio/worker": "~1.24.0",
+    "@temporalio/workflow": "~1.24.0",
+    "mongodb": "~7.7.0",
+    "redis": "~6.3.0",
+    "rss-parser": "~3.13.0",
+    "tldts": "~7.4.19",
+    "web-push": "~3.6.7",
+    "zod": "~4.6.7"
+  },
+  "devDependencies": {
+    "@types/web-push": "~3.6.4"
+  }
+}

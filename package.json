@@ -1,0 +1,30 @@
+{
+  "name": "technews",
+  "private": true,
+  "description": "Tech news cards with verified 'Try it' guides",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "worker": "npm run worker -w @technews/worker",
+    "ingest": "npm run run-once -w @technews/worker -- ingest",
+    "summarize": "npm run run-once -w @technews/worker -- summarize",
+    "schedules": "npm run schedules -w @technews/worker",
+    "api": "npm run dev -w @technews/api",
+    "web": "npm run dev -w @technews/web",
+    "try-links": "npm run run-once -w @technews/worker -- try-links",
+    "refresh": "npm run run-once -w @technews/worker -- refresh",
+    "digest": "npm run run-once -w @technews/worker -- digest"
+  },
+  "engines": {
+    "node": ">=22.9"
+  },
+  "devDependencies": {
+    "@types/node": "~26.6.5",
+    "tsx": "~4.23.15",
+    "typescript": "~7.0.2"
+  }
+}

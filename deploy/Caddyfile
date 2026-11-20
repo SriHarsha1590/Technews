@@ -1,0 +1,10 @@
+# HTTPS certificates are fetched and renewed automatically. DOMAIN comes from .env.production.
+{$DOMAIN} {
+  encode gzip zstd
+  handle /api/* {
+    reverse_proxy api:4000
+  }
+  handle {
+    reverse_proxy web:80
+  }
+}

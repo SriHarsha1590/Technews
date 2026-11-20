@@ -1,0 +1,23 @@
+# Local infrastructure. Apps run on your machine with npm scripts.
+# Host ports come from .env (MONGO_PORT, REDIS_PORT, ...) so they can avoid clashes with other projects.
+services:
+  mongo:
+    image: mongo:8
+    ports: ["${MONGO_PORT:-27017}:27017"]
+    volumes: [mongo-data:/data/db]
+
+  redis:
+    image: redis:8
+    ports: ["${REDIS_PORT:-6379}:6379"]
+
+  temporal:
+    image: temporalio/temporal:latest  # Temporal CLI dev server; not for production
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    ports:
+      - "${TEMPORAL_PORT:-7233}:7233"  # gRPC (workers and clients connect here)
+      - "${TEMPORAL_UI_PORT:-8233}:8233"  # Web UI
+    volumes: [temporal-data:/data]
+
+volumes:
+  mongo-data:
+  temporal-data:

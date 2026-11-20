@@ -1,0 +1,112 @@
+# Production stack on one server:  docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Only Caddy (80/443) is reachable from the internet. Databases and Temporal stay on the private network.
+# To scale: docker compose ... up -d --scale api=3 --scale worker=2  (lower LLM_CALLS_PER_SECOND per worker accordingly)
+x-app-env: &app-env
+  MONGO_URL: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+  MONGO_DB: technews
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+  TEMPORAL_API_KEY: ${TEMPORAL_API_KEY:-}
+  TEMPORAL_TLS: ${TEMPORAL_TLS:-false}
+  TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+  GEMINI_API_KEY: ${GEMINI_API_KEY}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+  LLM_CALLS_PER_SECOND: ${LLM_CALLS_PER_SECOND:-1}
+  LLM_DAILY_CAP: ${LLM_DAILY_CAP:-800}
+  FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+  VAPID_SUBJECT: ${VAPID_SUBJECT}
+  BOT_INFO_URL: ${BOT_INFO_URL:-https://${DOMAIN}}
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: { DOMAIN: "${DOMAIN}" }
+    volumes: ["./deploy/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy-data:/data", "caddy-config:/config"]
+    depends_on: [api, web]
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        VITE_API_URL: https://${DOMAIN}/api/v1
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID}
+    restart: unless-stopped
+
+  api:
+    build: { context: ., target: api }
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      API_PORT: "4000"
+      WEB_ORIGINS: https://${DOMAIN}
+      TRUST_PROXY: "1" # Caddy is the one proxy in front
+      REFRESH_ADMIN_UIDS: ${REFRESH_ADMIN_UIDS:?set REFRESH_ADMIN_UIDS in .env.production to your Firebase user id}
+    depends_on: [mongo, redis]
+
+  worker:
+    build: { context: ., target: worker }
+    restart: unless-stopped
+    environment: *app-env
+    depends_on: [mongo, redis]
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes: ["mongo-data:/data/db"]
+
+  mongo-backup: # a compressed dump every 24h, keeps the last 7. Copy ./backups off the server too.
+    image: mongo:8
+    restart: unless-stopped
+    depends_on: [mongo]
+    volumes: ["./backups:/backups"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          mongodump --uri="mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin" --archive=/backups/technews-$$(date +%F).gz --gzip
+          ls -1t /backups/technews-*.gz | tail -n +8 | xargs -r rm
+          sleep 86400
+        done
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+
+  # Self-hosted Temporal backed by PostgreSQL. To use Temporal Cloud instead, delete these two services and set
+  # TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE, TEMPORAL_API_KEY and TEMPORAL_TLS=true in .env.production.
+  temporal-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment: { POSTGRES_USER: temporal, POSTGRES_PASSWORD: "${TEMPORAL_DB_PASSWORD}" }
+    volumes: ["temporal-db:/var/lib/postgresql/data"]
+
+  temporal:
+    image: temporalio/auto-setup:1.26
+    restart: unless-stopped
+    depends_on: [temporal-db]
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: temporal-db
+
+volumes:
+  mongo-data:
+  redis-data:
+  temporal-db:
+  caddy-data:
+  caddy-config:
