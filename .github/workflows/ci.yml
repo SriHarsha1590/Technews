@@ -1,0 +1,65 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8.0.15
+        ports: ['27017:27017']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.12.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:integration -w @technews/api
+      - run: npm run test:integration -w @technews/worker
+      - run: npm run build -w @technews/web
+      - name: Lint TypeScript
+        run: npm run lint
+      - name: Check formatting
+        run: npm run format:check
+      - name: Coverage report
+        run: npm run coverage
+      - run: npm audit --audit-level=high
+      - run: docker build --target api -t technews-api:ci .
+      - run: docker build --target worker -t technews-worker:ci .
+      - run: docker build --target web -t technews-web:ci .
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: technews-api:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: technews-worker:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+      - uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: technews-web:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v4

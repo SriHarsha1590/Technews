@@ -86,8 +86,8 @@ export function Feed({ queryKey, fetchPage, label, empty, enabled = true, ready 
 
       {query.isError && stories.length === 0 && (
         <div className="card card-note" role="alert">
-          <p>{query.error.message}</p>
-          <p className="hint">Check that the API is running with <code>npm run api</code>, then try again.</p>
+          <p>We could not load stories right now.</p>
+          <p className="hint">Check your connection and try again in a moment.</p>
           <button type="button" className="primary" onClick={() => void query.refetch()}>
             Try again
           </button>
@@ -106,7 +106,7 @@ export function Feed({ queryKey, fetchPage, label, empty, enabled = true, ready 
 
       {query.isError && stories.length > 0 && (
         <div className="card card-note" role="alert">
-          <p>{query.error.message}</p>
+          <p>We could not load more stories right now.</p>
           <button type="button" className="primary" onClick={() => void fetchNextPage()}>
             Load more
           </button>

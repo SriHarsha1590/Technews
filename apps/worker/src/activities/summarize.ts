@@ -12,10 +12,12 @@ import {
   type StorySource,
   type Category,
 } from '@technews/shared';
+import { safeFetchHtml } from '@technews/shared/safe-fetch';
 import { articles, stories } from '../db';
 import { groupByTitle, sameStory } from '../cluster';
 import { extractText } from '../extract';
 import { generateJson, DailyCapReached } from '../llm';
+import { opsLog } from '../ops-log';
 import { USER_AGENT } from '../config';
 
 const MAX_ATTEMPTS = 3;
@@ -108,14 +110,8 @@ export async function assignToStories(pending: ArticleLite[]): Promise<{ attache
 // ---------- Step 3: build the text the AI will read ----------
 
 async function fetchPageText(url: string): Promise<string> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': USER_AGENT } });
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('text/html')) return '';
-    // Some pages (blog.google) carry ~800 KB of inline scripts before the first paragraph.
-    return extractText((await res.text()).slice(0, 2_000_000));
-  } catch {
-    return ''; // page unreachable: we'll work with the snippet
-  }
+  const html = await safeFetchHtml(url, { maxBytes: 2_000_000, userAgent: USER_AGENT });
+  return html ? extractText(html) : '';
 }
 
 export async function buildContexts(groups: ArticleLite[][]): Promise<GroupInput[]> {
@@ -169,12 +165,41 @@ export function parseSummaryResponse(raw: unknown, groupCount: number): Omit<Sum
   return out;
 }
 
-export async function summarizeGroups(inputs: GroupInput[]): Promise<SummarizeResult> {
+/** A short, source-attributed preview keeps the feed usable during a provider outage. */
+export function sourcePreviews(inputs: GroupInput[]): SummarizeResult {
+  const result: SummarizeResult = { summaries: [], insufficient: [], invalid: [], capped: false };
+  inputs.forEach(({ articles }, groupIndex) => {
+    const primary = pickPrimary(articles);
+    const snippet = primary.snippet.replace(/\s+/g, ' ').trim();
+    if (primary.title.length < 10 || !snippet) {
+      result.insufficient.push(groupIndex);
+      return;
+    }
+    const preview = snippet.length > 240 ? `${snippet.slice(0, 237).trimEnd()}…` : snippet;
+    result.summaries.push({
+      groupIndex,
+      summary: {
+        index: groupIndex,
+        title: primary.title.slice(0, 120),
+        summary: `From ${primary.sourceName}: ${preview} Read the original article for full details.`,
+        tags: [primary.category],
+        category: primary.category,
+      },
+    });
+  });
+  return result;
+}
+
+export async function summarizeGroups(inputs: GroupInput[], generate: typeof generateJson = generateJson): Promise<SummarizeResult> {
   let raw: unknown;
   try {
-    raw = await generateJson(buildPrompt(inputs), SummaryResponse);
+    raw = await generate(buildPrompt(inputs), SummaryResponse);
   } catch (err) {
     if (err instanceof DailyCapReached) return { summaries: [], insufficient: [], invalid: [], capped: true };
+    if (Number((err as { status?: unknown })?.status) === 503) {
+      opsLog('warn', 'summary_source_preview', { groups: inputs.length });
+      return sourcePreviews(inputs);
+    }
     throw err; // e.g. 429 rate limit: Temporal retries with backoff
   }
   const result = { ...parseSummaryResponse(raw, inputs.length), capped: false };

@@ -4,6 +4,7 @@ import { CATEGORY_LABEL, timeAgo } from '../format';
 import { Link } from '../router';
 import { Icon } from './Icon';
 import { WatchSheet } from './WatchSheet';
+import { externalUrl } from '../externalUrl';
 
 /** Page title with a way back to the stories. */
 export function PageHeader({ title, children }: { title: string; children?: ReactNode }) {
@@ -47,9 +48,9 @@ export function StoryRow({ story, meta, onRead, remove }: Props) {
           {meta}
         </p>
         <h3 className="row-title">
-          <a href={story.primaryUrl} target="_blank" rel="noopener noreferrer" onClick={() => onRead?.(false)}>
-            {story.title}
-          </a>
+          {externalUrl(story.primaryUrl) ? (
+            <a href={externalUrl(story.primaryUrl)!} target="_blank" rel="noopener noreferrer" onClick={() => onRead?.(false)}>{story.title}</a>
+          ) : story.title}
         </h3>
         <div className="row-actions">
           <button

@@ -68,6 +68,9 @@ export const fetchPushKey = () => request<{ data: { publicKey: string } }>('/pus
 const page = (cursor?: string) => (cursor ? `?cursor=${encodeURIComponent(cursor)}` : '');
 
 export const fetchMe = (token: string) => request<{ data: Me }>('/me', {}, token).then((r) => r.data);
+export const fetchCapabilities = (token: string) => request<{ data: { admin: boolean } }>('/me/capabilities', {}, token).then((r) => r.data);
+export const fetchAdmin = (token: string) => request<{ data: { mongo: boolean; redis: boolean; pipeline: Omit<RefreshStatus, 'feedVersion'>; feedVersion: number | null } }>('/me/admin', {}, token).then((r) => r.data);
+export const fetchStory = (id: string) => request<{ data: import('@technews/shared').StoryDetail }>(`/stories/${encodeURIComponent(id)}`).then((r) => r.data);
 export const fetchForYou = (token: string, cursor?: string) => request<StoryPage>(`/me/feed${page(cursor)}`, {}, token);
 export const fetchSaved = (token: string, cursor?: string) => request<StoryPage>(`/me/bookmarks${page(cursor)}`, {}, token);
 export const fetchSavedIds = (token: string) => request<{ data: string[] }>('/me/bookmarks/ids', {}, token).then((r) => r.data);

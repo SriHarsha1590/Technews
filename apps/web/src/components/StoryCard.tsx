@@ -5,6 +5,8 @@ import { WatchSheet } from './WatchSheet';
 import { Icon } from './Icon';
 import { TRUST_LABEL, coverageText, timeAgo } from '../format';
 import { READ_AFTER_MS } from '../history';
+import { shareStory } from '../share';
+import { externalUrl } from '../externalUrl';
 
 interface Props {
   story: Story;
@@ -16,6 +18,7 @@ interface Props {
 }
 
 export function StoryCard({ story, onAsk, save, onRead }: Props) {
+  const [shareNote, setShareNote] = useState('');
   const tier = story.primarySource.trustTier;
   const [open, setOpen] = useState<'try' | 'watch' | null>(null);
   const [imageOk, setImageOk] = useState(true);
@@ -60,18 +63,29 @@ export function StoryCard({ story, onAsk, save, onRead }: Props) {
         <time className="when" dateTime={story.publishedAt}>
           {timeAgo(story.publishedAt)}
         </time>
-        {save && (
+        <span className="card-meta-tools">
           <button
             type="button"
-            className="save"
-            aria-pressed={save.saved}
-            aria-label={save.saved ? 'Saved' : 'Save'}
-            title={save.saved ? 'Remove from Saved' : 'Save for later'}
-            onClick={save.toggle}
+            className="card-share"
+            aria-label={`Share ${story.title}`}
+            title="Share story"
+            onClick={() => { void shareStory(story.id, story.title).then(setShareNote); }}
           >
-            <Icon name="save" />
+            <Icon name="share" />
           </button>
-        )}
+          {save && (
+            <button
+              type="button"
+              className="save"
+              aria-pressed={save.saved}
+              aria-label={save.saved ? 'Saved' : 'Save'}
+              title={save.saved ? 'Remove from Saved' : 'Save for later'}
+              onClick={save.toggle}
+            >
+              <Icon name="save" />
+            </button>
+          )}
+        </span>
       </header>
 
       {story.imageUrl && (
@@ -82,9 +96,9 @@ export function StoryCard({ story, onAsk, save, onRead }: Props) {
       )}
 
       <h2 className="headline" id={`h-${story.id}`}>
-        <a href={story.primaryUrl} target="_blank" rel="noopener noreferrer" onClick={() => onRead?.(false)}>
-          {story.title}
-        </a>
+        {externalUrl(story.primaryUrl) ? (
+          <a href={externalUrl(story.primaryUrl)!} target="_blank" rel="noopener noreferrer" onClick={() => onRead?.(false)}>{story.title}</a>
+        ) : story.title}
       </h2>
       <p className="byline">By {story.author ?? story.primarySource.name}</p>
 
@@ -109,6 +123,7 @@ export function StoryCard({ story, onAsk, save, onRead }: Props) {
           Ask
         </button>
       </footer>
+      {shareNote && <p role="status">{shareNote}</p>}
 
       <TrySheet story={story} open={open === 'try'} onClose={close} />
       <WatchSheet story={story} open={open === 'watch'} onClose={close} />

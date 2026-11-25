@@ -91,6 +91,7 @@ export interface TryLinksRunSummary {
   withoutCandidates: number;
   withLinks: number;
   capped: boolean;
+  unavailable: boolean;
 }
 
 const TRY_BATCH_SIZE = 5; // stories per AI call (each brings up to ~60 links)
@@ -109,6 +110,7 @@ async function findTryLinks(list: Awaited<ReturnType<typeof loadStoriesNeedingTr
   const todo = all.filter((s) => s.candidates.length > 0);
   let withLinks = 0;
   let capped = false;
+  let unavailable = false;
   for (let i = 0; i < todo.length; i += TRY_BATCH_SIZE) {
     const batch = todo.slice(i, i + TRY_BATCH_SIZE);
     const picks = await classifyTryLinks(batch);
@@ -116,9 +118,13 @@ async function findTryLinks(list: Awaited<ReturnType<typeof loadStoriesNeedingTr
       capped = true; // daily AI budget used up: these stay unsearched and are retried tomorrow
       break;
     }
+    if (picks.unavailable) {
+      unavailable = true; // provider outage: leave these unsearched for the next refresh
+      break;
+    }
     withLinks += await verifyAndSaveTryLinks(batch, picks);
   }
-  return { searched: list.length, withoutCandidates: empty.length, withLinks, capped };
+  return { searched: list.length, withoutCandidates: empty.length, withLinks, capped, unavailable };
 }
 
 export interface RefreshSummary {
@@ -128,6 +134,7 @@ export interface RefreshSummary {
   batches: { newStories: number; withLinks: number }[];
   catchUp: { images: number; tryLinks: TryLinksRunSummary | null };
   capped: boolean;
+  unavailable: boolean;
 }
 
 const CATCH_UP_IMAGES = 20;
@@ -140,7 +147,7 @@ const CATCH_UP_TRY_LINKS = 15;
  * So the first cards (with their Try it links) are ready after one batch, not after all of them.
  * Then it catches up on older stories still missing an image or Try it links, and re-ranks every feed.
  */
-export async function refreshWorkflow(): Promise<RefreshSummary> {
+async function runRefreshWorkflow(): Promise<RefreshSummary> {
   // Child id is unique per run, so it never collides with the scheduled ingest.
   const ingest = await executeChild(ingestAllWorkflow, { workflowId: `${workflowInfo().workflowId}-ingest-${workflowInfo().runId}` });
 
@@ -150,6 +157,7 @@ export async function refreshWorkflow(): Promise<RefreshSummary> {
 
   const batches: RefreshSummary['batches'] = [];
   let capped = false;
+  let unavailable = false;
   for (let i = 0; i < groups.length; i += BATCH_SIZE) {
     const inputs = await buildContexts(groups.slice(i, i + BATCH_SIZE));
     const result = await summarizeGroups(inputs);
@@ -169,15 +177,33 @@ export async function refreshWorkflow(): Promise<RefreshSummary> {
       capped = true;
       break;
     }
+    if (links.unavailable) {
+      unavailable = true;
+      break;
+    }
   }
 
   // Leftovers: stories from earlier runs that hit the AI cap, or whose image/link search didn't finish.
   const images = await findStoryImages(CATCH_UP_IMAGES);
-  const tryLinks = capped ? null : await findTryLinks(await loadStoriesNeedingTryLinks(CATCH_UP_TRY_LINKS));
+  const tryLinks = capped || unavailable ? null : await findTryLinks(await loadStoriesNeedingTryLinks(CATCH_UP_TRY_LINKS));
   if (tryLinks?.capped) capped = true;
+  if (tryLinks?.unavailable) unavailable = true;
 
   await rebuildFeeds(); // always: scores change as stories age
-  return { ingest, pending: pending.length, attachedToExisting: attached, batches, catchUp: { images, tryLinks }, capped };
+  const summary = { ingest, pending: pending.length, attachedToExisting: attached, batches, catchUp: { images, tryLinks }, capped, unavailable };
+  if (capped) log.warn('pipeline AI cap reached', { event: 'pipeline_ai_cap', workflowId: workflowInfo().workflowId });
+  if (unavailable) log.warn('pipeline Try it links deferred', { event: 'pipeline_ai_unavailable', workflowId: workflowInfo().workflowId });
+  log.info('pipeline completed', { event: 'pipeline_completed', workflowId: workflowInfo().workflowId, pending: pending.length, batches: batches.length });
+  return summary;
+}
+
+export async function refreshWorkflow(): Promise<RefreshSummary> {
+  try {
+    return await runRefreshWorkflow();
+  } catch (error) {
+    log.error('pipeline failed', { event: 'pipeline_failed', workflowId: workflowInfo().workflowId, errorName: error instanceof Error ? error.name : 'UnknownError' });
+    throw error;
+  }
 }
 
 /** Weekly: re-check saved links and drop any that died or moved off the official site. */

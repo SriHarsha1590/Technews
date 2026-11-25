@@ -91,7 +91,7 @@ body {
   gap: 1rem;
   margin: 0 auto;
   padding: 0 1.25rem;
-  max-width: 600px;
+  max-width: 720px;
 }
 
 .brand {
@@ -108,7 +108,7 @@ body {
   overflow-x: auto;
   scrollbar-width: none;
   margin: 0 auto;
-  max-width: 600px;
+  max-width: 720px;
   padding: 0.5rem 1rem 0;
 }
 
@@ -142,7 +142,7 @@ body {
 .feed {
   height: 100%;
   overflow-y: auto;
-  scroll-snap-type: y mandatory;
+  scroll-snap-type: y proximity;
   overscroll-behavior: contain;
 }
 
@@ -167,7 +167,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem 0.75rem;
+  gap: 0.35rem 0.5rem;
   font-size: 0.85rem;
   color: var(--muted);
 }
@@ -252,6 +252,17 @@ body {
   gap: 0.5rem;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
+}
+
+/* Keep the three story actions in reach while a long card scrolls on a phone. */
+@media (max-width: 719px) {
+  .actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--card);
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 .action {
@@ -483,6 +494,8 @@ body {
   font-weight: 650;
   padding: 0.4rem 1rem;
   min-height: 40px;
+  white-space: nowrap;
+  flex: none;
   cursor: pointer;
 }
 
@@ -498,22 +511,35 @@ body {
   cursor: pointer;
 }
 
-/* Bookmark button in the card header. */
-.save {
+/* Quiet header actions leave the three story actions as the card's main buttons. */
+.card-meta-tools {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin: -0.75rem -0.5rem -0.75rem auto;
+}
+
+.save,
+.card-share {
   display: inline-grid;
   place-items: center;
-  width: 44px;
+  width: 36px;
   height: 44px;
-  margin: -0.75rem -0.75rem -0.75rem 0;
   border: 0;
   background: none;
   color: var(--muted);
   cursor: pointer;
 }
 
-.save svg {
+.save svg,
+.card-share svg {
   width: 20px;
   height: 20px;
+}
+
+.card-share:hover,
+.card-share:focus-visible {
+  color: var(--blue-strong);
 }
 
 .save[aria-pressed='true'] {
@@ -687,6 +713,28 @@ body {
   opacity: 0.75;
 }
 
+.reader-refresh {
+  position: relative;
+  display: inline-flex;
+}
+
+.reader-refresh-note {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  z-index: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.3rem;
+  background: var(--blue-tint);
+  color: var(--blue-strong);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.reader-refresh-note:empty {
+  display: none;
+}
+
 .refresh {
   position: relative;
 }
@@ -722,7 +770,7 @@ body {
 }
 
 /* Phones: icons only, so the bar fits next to the brand. */
-@media (max-width: 520px) {
+@media (max-width: 680px) {
   .topbar-actions .ask-top {
     font-size: 0;
     gap: 0;
@@ -734,6 +782,17 @@ body {
   .topbar-actions .ask-top svg {
     width: 18px;
     height: 18px;
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar-row {
+    gap: 0.5rem;
+    padding: 0 0.75rem;
+  }
+
+  .topbar-actions {
+    gap: 0.25rem;
   }
 }
 
@@ -888,7 +947,12 @@ body {
   border: 3px solid var(--line);
   border-top-color: var(--blue);
   border-radius: 50%;
-  animation: spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: spin 0.9s linear infinite;
+  }
 }
 
 /* ---------- Watch: a 9:16-ish narrated slideshow ---------- */
@@ -1224,7 +1288,12 @@ body {
   height: 7px;
   border-radius: 50%;
   background: var(--muted);
-  animation: pulse 0.8s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bubble-typing span {
+    animation: pulse 0.8s ease-in-out infinite alternate;
+  }
 }
 
 .bubble-typing span:nth-child(2) {
@@ -1910,3 +1979,7 @@ a.chip {
     grid-template-columns: 64px minmax(0, 1fr);
   }
 }
+/* Reader and operator additions share the existing responsive page layout. */
+.admin-status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: .75rem; }
+.admin-status dd { margin: 0; overflow-wrap: anywhere; }
+.actions { flex-wrap: wrap; }

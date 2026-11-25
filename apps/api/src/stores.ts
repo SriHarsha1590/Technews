@@ -1,7 +1,7 @@
 // Data access behind small interfaces, so routes can be tested with in-memory fakes.
 import { MongoClient, type Collection } from 'mongodb';
 import type { RedisClientType } from 'redis';
-import { feedCurrentKey, feedKey, RETENTION_DAYS, type FeedName, type PopularTag, type Story, type StoryCard, type StoryDetail } from '@technews/shared';
+import { CONTENT_RETENTION_INDEXES, feedCurrentKey, feedKey, RETENTION_DAYS, type FeedName, type PopularTag, type Story, type StoryCard, type StoryDetail } from '@technews/shared';
 
 export interface FeedStore {
   currentVersion(feed: FeedName): Promise<number | null>;
@@ -126,6 +126,15 @@ export async function ensureStoryTextIndex(client: MongoClient, dbName: string):
       name: 'story_text',
       weights: { title: 5, matchTitles: 3, tags: 3, summary: 1 },
     });
+}
+
+/** TTL uses insertion timestamps so later updates do not extend retention. */
+export async function ensureContentRetentionIndexes(client: MongoClient, dbName: string): Promise<void> {
+  const db = client.db(dbName);
+  await Promise.all([
+    db.collection('articles').createIndex(CONTENT_RETENTION_INDEXES.articles.key, { name: CONTENT_RETENTION_INDEXES.articles.name, expireAfterSeconds: CONTENT_RETENTION_INDEXES.articles.expireAfterSeconds }),
+    db.collection('stories').createIndex(CONTENT_RETENTION_INDEXES.stories.key, { name: CONTENT_RETENTION_INDEXES.stories.name, expireAfterSeconds: CONTENT_RETENTION_INDEXES.stories.expireAfterSeconds }),
+  ]);
 }
 
 export function mongoAssistStore(client: MongoClient, dbName: string): AssistStore {

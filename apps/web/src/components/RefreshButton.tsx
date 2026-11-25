@@ -14,14 +14,14 @@ export function RefreshButton({ onUpdate }: Props) {
   const { user, token } = useAuth();
   const [message, setMessage] = useState('');
   const [batches, setBatches] = useState(0); // feed updates seen during this run
-  const watching = useRef(false); // only a run this button started (or joined) reloads the feed
+  const watching = useRef(false); // follow a run already active when the admin opens this page, too
   const lastVersion = useRef<number | null>(null);
 
-  // Polls every 3 seconds while a run is going. A page load during a run picks it up too.
+  // Polls while the admin page is open, so scheduled runs that start later also appear.
   const status = useQuery({
     queryKey: ['refresh'],
     queryFn: fetchRefreshStatus,
-    refetchInterval: (q) => (q.state.data?.state === 'running' ? 3000 : false),
+    refetchInterval: 3000,
     retry: false,
   });
 
@@ -39,7 +39,15 @@ export function RefreshButton({ onUpdate }: Props) {
 
   useEffect(() => {
     const data = status.data;
-    if (!watching.current || !data) return;
+    if (!data) return;
+    if (data.state === 'running' && !watching.current) {
+      watching.current = true;
+      lastVersion.current = data.feedVersion;
+      setBatches(0);
+      setMessage('');
+      return;
+    }
+    if (!watching.current) return;
     if (data.feedVersion !== lastVersion.current) {
       lastVersion.current = data.feedVersion;
       setBatches((n) => n + 1);
@@ -63,7 +71,7 @@ export function RefreshButton({ onUpdate }: Props) {
 
   if (!user) return null; // starting a run spends AI quota, so only signed-in readers can
 
-  const busy = status.data?.state === 'running' || start.isPending;
+  const busy = status.isPending || status.data?.state === 'running' || start.isPending;
   return (
     <div className="refresh">
       <button
@@ -76,10 +84,12 @@ export function RefreshButton({ onUpdate }: Props) {
         <span className={busy ? 'spin' : undefined}>
           <Icon name="replay" />
         </span>
-        {busy ? 'Refreshing…' : 'Refresh'}
+        {status.data?.state === 'running' ? 'Pipeline running…' : start.isPending ? 'Starting pipeline…' : status.isPending ? 'Checking pipeline…' : 'Run news pipeline'}
       </button>
       <p className="refresh-note" role="status">
-        {busy ? (batches ? 'New stories added, more coming…' : 'Fetching new stories…') : message}
+        {status.data?.state === 'running'
+          ? (batches ? 'New stories published; the run continues.' : 'A pipeline run is in progress. This page follows it.')
+          : start.isPending ? 'Starting a run…' : message}
       </p>
     </div>
   );

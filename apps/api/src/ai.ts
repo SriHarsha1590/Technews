@@ -1,5 +1,5 @@
 // The API's only link to the AI provider (Gemini's free tier). Mirrors the worker's llm.ts and shares its
-// daily budget in Redis, so Watch, Try it and Ask can never push the day's calls past LLM_DAILY_CAP.
+// separate daily budget in Redis, reserving the worker's allocation for ingestion.
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import type { RedisClientType } from 'redis';
@@ -10,7 +10,9 @@ export interface Ai {
 }
 
 /** No key, daily cap reached, or the provider is busy: the reader sees "try again later", never a stack trace. */
-export class AiUnavailable extends Error {}
+export class AiUnavailable extends Error {
+  constructor(message: string, readonly reason: 'cap' | 'budget_store' | 'provider' = 'provider') { super(message); }
+}
 
 interface Options {
   apiKey: string;
@@ -23,15 +25,15 @@ export function geminiAi({ apiKey, model, dailyCap, redis }: Options): Ai {
   let client: GoogleGenAI | undefined;
 
   async function takeDailyBudget() {
-    const key = `llm:calls:${new Date().toISOString().slice(0, 10)}`; // same key as the worker
+    const key = `llm:public:calls:${new Date().toISOString().slice(0, 10)}`;
     let used: number;
     try {
       used = await redis.incr(key);
       if (used === 1) await redis.expire(key, 2 * 24 * 3600);
     } catch {
-      return; // Redis down: Gemini's own free-tier limits still apply
+      throw new AiUnavailable('The AI quota service is unavailable. Try again later.', 'budget_store');
     }
-    if (used > dailyCap) throw new AiUnavailable('The daily AI limit has been reached. Try again tomorrow.');
+    if (used > dailyCap) throw new AiUnavailable('The daily AI limit has been reached. Try again tomorrow.', 'cap');
   }
 
   return {
@@ -48,7 +50,7 @@ export function geminiAi({ apiKey, model, dailyCap, redis }: Options): Ai {
         });
         text = res.text;
       } catch (err) {
-        console.warn('ai call failed', (err as Error).message);
+        console.warn(JSON.stringify({ time: new Date().toISOString(), event: 'public_ai_provider_failed' }));
         throw new AiUnavailable('The AI service is busy right now. Try again in a minute.');
       }
       if (!text) throw new AiUnavailable('The AI service returned nothing. Try again.');

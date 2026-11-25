@@ -113,6 +113,15 @@ test('falls back to MongoDB when Redis is down', async () => {
   assert.equal(health.body.status, 'degraded');
 });
 
+test('stale Redis snapshot does not hide stories still present in MongoDB', async () => {
+  reset();
+  snapshots.set('all:100', [id(99)]);
+  const r = await get('/feed?limit=2');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.data.map((c: StoryCard) => c.title), ['Story 1', 'Story 2']);
+  assert.equal(r.body.meta.servedFrom, 'mongo');
+});
+
 test('rejects bad input with a clear error', async () => {
   reset();
   const badCategory = await get('/feed?category=sports');

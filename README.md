@@ -14,7 +14,7 @@ Readers can sign in to save stories, see their reading history, and get a push d
 
 ## Quick start
 
-Requires Node 22.9+ and Docker.
+Requires Node 24.12+ and Docker.
 
 ```bash
 cp .env.example .env              # add your GEMINI_API_KEY
@@ -28,11 +28,12 @@ npm run refresh                   # optional: run the pipeline once right now
 
 While the worker is running, the `pipeline` schedule runs `refreshWorkflow` **every 5 minutes**:
 ingest every feed -> group -> summarize -> card images -> Try it links -> re-rank. The web app does not poll:
-new cards appear when the page is reloaded, or when Refresh is pressed.
+new cards appear when the page is reloaded or when a reader presses **Refresh stories**. That button checks for cards the pipeline has already published; it does not start another pipeline run.
 
-The **Refresh** button does the same as `npm run refresh`: it starts `refreshWorkflow` through the API
-(`POST /api/v1/refresh`) and reloads the feed when it finishes. Clicking again while a run is going joins that run.
-In production, only the user ids in `REFRESH_ADMIN_UIDS` can press it.
+The admin dashboard's **Run news pipeline** button does the same as `npm run refresh`: it starts
+`refreshWorkflow` through the API (`POST /api/v1/refresh`). In production, only the user ids in
+`REFRESH_ADMIN_UIDS` can start that run because it fetches sources and spends AI quota. If a run is
+already active, the dashboard follows its status and does not start another one.
 
 ## Scripts
 
@@ -43,7 +44,8 @@ In production, only the user ids in `REFRESH_ADMIN_UIDS` can press it.
 | `npm run refresh` | Run the full pipeline once |
 | `npm run ingest` / `summarize` / `try-links` / `digest` | Run a single pipeline step once |
 | `npm run schedules` | Register the schedules (hourly digest) |
-| `npm test` / `npm run typecheck` | Tests / type checks in every workspace |
+| `npm test` / `npm run typecheck` | Tests / type checks in every workspace
+| `npm run lint` / `npm run format:check` / `npm run coverage` | Static checks and coverage gate |
 
 ## Layout
 
@@ -62,7 +64,7 @@ docs/             step-by-step guides
 - [02-api.md](docs/02-api.md), [03-web.md](docs/03-web.md): API and web app
 - [04-try-it.md](docs/04-try-it.md): how Try it links are verified
 - [05-accounts.md](docs/05-accounts.md): sign-in (Firebase) and push notifications
-- [06-deploy.md](docs/06-deploy.md): deploy to one server with HTTPS
+- [06-deploy.md](docs/06-deploy.md): deploy to AWS EC2 or another Linux server with HTTPS
 
 ## Status
 
@@ -74,4 +76,5 @@ docs/             step-by-step guides
 - [x] API + card UI
 - [x] Try it, Ask and Watch on every card
 - [x] Sign-in, bookmarks, history, push digest
-- [x] Production deploy (Docker Compose, Caddy HTTPS, daily Mongo backups)
+- [x] Production deployment configuration (Docker Compose, Caddy HTTPS, off-host Mongo backups)
+- [ ] Live EC2 deployment, restore drill, and alert delivery verified

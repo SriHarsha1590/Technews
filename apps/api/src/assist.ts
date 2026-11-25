@@ -28,6 +28,18 @@ export interface AssistDeps {
 }
 
 const ATTEMPTS = 2; // one retry when the AI breaks the rules (e.g. 200 words)
+const inFlight = new WeakMap<AssistStore, Map<string, Promise<unknown>>>();
+
+function singleFlight<T>(store: AssistStore, key: string, work: () => Promise<T>): Promise<T> {
+  let pending = inFlight.get(store);
+  if (!pending) { pending = new Map(); inFlight.set(store, pending); }
+  const current = pending.get(key);
+  if (current) return current as Promise<T>;
+  const promise = Promise.resolve().then(work);
+  pending.set(key, promise);
+  void promise.finally(() => { if (pending?.get(key) === promise) pending.delete(key); }).catch(() => {});
+  return promise;
+}
 
 async function generate<T>(ai: Ai, prompt: string, schema: z.ZodType<T>, prepare: (raw: unknown) => unknown = (r) => r): Promise<T> {
   for (let i = 0; i < ATTEMPTS; i++) {
@@ -60,7 +72,11 @@ Use ONLY facts from the text below for the story itself. No URLs, no markdown, n
 ${storyBlock(s, articleText)}`;
 }
 
-export async function getExplainer(id: string, d: AssistDeps): Promise<ExplainerView | null> {
+export function getExplainer(id: string, d: AssistDeps): Promise<ExplainerView | null> {
+  return singleFlight(d.store, `explainer:${id}`, () => createExplainer(id, d));
+}
+
+async function createExplainer(id: string, d: AssistDeps): Promise<ExplainerView | null> {
   const s = await d.store.story(id);
   if (!s) return null;
   if (s.explainer) return { storyId: id, imageUrl: s.explainer.imageUrl, scenes: s.explainer.scenes, seconds: seconds(s.explainer.scenes) };
@@ -95,7 +111,11 @@ Return {"steps": ["...", "..."]}.${links}
 ${storyBlock(s, articleText)}`;
 }
 
-export async function getTryGuide(id: string, d: AssistDeps): Promise<TryGuideView | null> {
+export function getTryGuide(id: string, d: AssistDeps): Promise<TryGuideView | null> {
+  return singleFlight(d.store, `tryGuide:${id}`, () => createTryGuide(id, d));
+}
+
+async function createTryGuide(id: string, d: AssistDeps): Promise<TryGuideView | null> {
   const s = await d.store.story(id);
   if (!s) return null;
   if (s.tryGuide) return { storyId: id, steps: s.tryGuide.steps };

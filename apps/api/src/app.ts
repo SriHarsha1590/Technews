@@ -28,6 +28,7 @@ import { CACHE } from './config';
 import { AiUnavailable } from './ai';
 import { ask, getExplainer, getTryGuide, type AssistDeps } from './assist';
 import { RefreshUnavailable, type Refresher } from './refresh';
+import { apiTelemetry } from './telemetry';
 
 export interface Deps {
   feeds: FeedStore;
@@ -39,6 +40,8 @@ export interface Deps {
   webOrigins: string[];
   vapidPublicKey: string;
   aiRequestsPerMinute?: number;
+  requestsPerMinute?: number;
+  userRequestsPerMinute?: number;
   /** Number of reverse proxies in front of the API (Nginx, Cloudflare, a load balancer). 0 when reachable directly. */
   trustProxy?: number;
   /** Who may start a Refresh. Empty: any signed-in reader. */
@@ -58,7 +61,7 @@ function sendError(res: Response, status: number, code: string, message: string,
 }
 
 /** Fixed one-minute window per caller (the IP). Shared across API instances when `shared` works, else per process. */
-function perMinuteLimit(max: number, shared?: (key: string) => Promise<number>): RequestHandler {
+function perMinuteLimit(max: number, namespace: string, identity: (req: Request, res: Response) => string, shared?: (key: string) => Promise<number>, onLimit?: (scope: string) => void): RequestHandler {
   const hits = new Map<string, { windowStart: number; count: number }>();
   const local = (key: string, now: number) => {
     const h = hits.get(key);
@@ -71,7 +74,7 @@ function perMinuteLimit(max: number, shared?: (key: string) => Promise<number>):
   };
   return async (req, res, next) => {
     const now = Date.now();
-    const key = req.ip ?? 'unknown';
+    const key = `${namespace}:${identity(req, res)}`;
     let result: { count: number; retryAfter: number };
     try {
       result = shared ? { count: await shared(key), retryAfter: 60 - Math.floor((now % 60_000) / 1000) } : local(key, now);
@@ -79,6 +82,7 @@ function perMinuteLimit(max: number, shared?: (key: string) => Promise<number>):
       result = local(key, now); // Redis down: still protect the quota, per process
     }
     if (result.count > max) {
+      onLimit?.(namespace);
       res.set('Retry-After', String(result.retryAfter));
       return sendError(res, 429, 'rate_limited', 'Too many requests. Wait a moment and try again.');
     }
@@ -94,8 +98,9 @@ function page(items: StoryPage['data'], offset: number): StoryPage {
   };
 }
 
-export function createApp({ feeds, stories, users, verify, assist, refresher, webOrigins, vapidPublicKey, aiRequestsPerMinute = 20, trustProxy = 0, refreshAdminUids = [], sharedCounter }: Deps) {
+export function createApp({ feeds, stories, users, verify, assist, refresher, webOrigins, vapidPublicKey, aiRequestsPerMinute = 20, requestsPerMinute = 120, userRequestsPerMinute = 120, trustProxy = 0, refreshAdminUids = [], sharedCounter }: Deps) {
   const app = express();
+  const telemetry = apiTelemetry();
   app.disable('x-powered-by');
   if (trustProxy > 0) app.set('trust proxy', trustProxy); // so req.ip is the visitor, not the proxy
   app.use(helmet());
@@ -107,9 +112,17 @@ export function createApp({ feeds, stories, users, verify, assist, refresher, we
     }),
   );
   app.use(express.json({ limit: '64kb' })); // Ask sends up to 100 story ids and the last few messages
+  app.use((req, res, next) => {
+    const started = Date.now();
+    res.on('finish', () => telemetry.request(req.method, res.statusCode, Date.now() - started));
+    next();
+  });
+  app.use(perMinuteLimit(requestsPerMinute, 'global', (req) => req.ip ?? 'unknown', sharedCounter, telemetry.rateLimit));
 
   const v1 = express.Router();
-  const aiLimit = perMinuteLimit(aiRequestsPerMinute, sharedCounter);
+  const aiLimit = perMinuteLimit(aiRequestsPerMinute, 'ai', (req) => req.ip ?? 'unknown', sharedCounter, telemetry.rateLimit);
+
+  v1.get('/metrics', (_req, res) => res.type('text/plain; version=0.0.4').send(telemetry.metrics()));
 
   // ---------- Public ----------
 
@@ -122,6 +135,7 @@ export function createApp({ feeds, stories, users, verify, assist, refresher, we
   v1.get('/feed', async (req, res) => {
     const query = FeedQuery.parse(req.query);
     const result = await getFeedPage(query, feeds, stories);
+    telemetry.feedPublishedAt(result.cards[0]?.publishedAt);
     const body: FeedResponse = { data: result.cards, meta: { nextCursor: result.nextCursor, servedFrom: result.servedFrom } };
     res.set('Cache-Control', result.cacheControl).json(body);
   });
@@ -196,7 +210,17 @@ export function createApp({ feeds, stories, users, verify, assist, refresher, we
     res.set('Cache-Control', CACHE.private);
     next();
   });
+  me.use(perMinuteLimit(userRequestsPerMinute, 'user', (_req, res) => res.locals.uid as string, sharedCounter, telemetry.rateLimit));
   const uidOf = (res: Response) => res.locals.uid as string;
+
+  me.get('/capabilities', (_req, res) => {
+    res.json({ data: { admin: refreshAdminUids.includes(uidOf(res)) } });
+  });
+  me.get('/admin', async (_req, res) => {
+    if (!refreshAdminUids.includes(uidOf(res))) return sendError(res, 403, 'forbidden', 'Administrator access required');
+    const [mongo, redis, pipeline, version] = await Promise.all([stories.ping(), feeds.ping(), refresher.status(), feedVersion()]);
+    res.json({ data: { mongo, redis, pipeline, feedVersion: version } });
+  });
 
   me.get('/', async (_req, res) => {
     res.json({ data: await users.me(uidOf(res)) });
@@ -227,16 +251,15 @@ export function createApp({ feeds, stories, users, verify, assist, refresher, we
 
   me.get('/bookmarks', async (req, res) => {
     const offset = Number(PageQuery.parse(req.query).cursor ?? 0);
-    const ids = await users.bookmarkPage(uidOf(res), offset, PAGE_SIZE + 1);
-    const cards = await stories.cardsByIds(ids);
-    // A saved story that has since been deleted is skipped; the page size comes from the ids.
-    res.json({ data: cards.slice(0, PAGE_SIZE), meta: { nextCursor: ids.length > PAGE_SIZE ? String(offset + PAGE_SIZE) : null } });
+    const cards = await users.bookmarkPage(uidOf(res), offset, PAGE_SIZE + 1);
+    res.json({ data: cards.slice(0, PAGE_SIZE), meta: { nextCursor: cards.length > PAGE_SIZE ? String(offset + PAGE_SIZE) : null } });
   });
 
   me.put('/bookmarks/:storyId', async (req, res) => {
     const storyId = StoryId.parse(req.params.storyId);
-    if (!(await stories.cardsByIds([storyId])).length) return sendError(res, 404, 'not_found', 'Story not found');
-    await users.addBookmark(uidOf(res), storyId); // saving twice is fine
+    const [card] = await stories.cardsByIds([storyId]);
+    if (!card) return sendError(res, 404, 'not_found', 'Story not found');
+    await users.addBookmark(uidOf(res), card); // saving twice is fine
     res.status(204).end();
   });
 
@@ -307,11 +330,11 @@ export function createApp({ feeds, stories, users, verify, assist, refresher, we
     }
     if (err instanceof AuthError) return sendError(res, err.code === 'unauthorized' ? 401 : 503, err.code, err.message);
     if (err instanceof BadCursorError) return sendError(res, 400, 'bad_cursor', 'Cursor is invalid; reload the feed from the top');
-    if (err instanceof AiUnavailable) return sendError(res, 503, 'ai_unavailable', err.message);
+    if (err instanceof AiUnavailable) { telemetry.aiFailure(err.reason); return sendError(res, 503, 'ai_unavailable', err.message); }
     if (err instanceof RefreshUnavailable) return sendError(res, 503, 'refresh_unavailable', err.message);
     if (err?.type === 'entity.parse.failed') return sendError(res, 400, 'invalid_json', 'Request body is not valid JSON');
     if (err?.type === 'entity.too.large') return sendError(res, 413, 'too_large', 'Request body is too large');
-    console.error(err);
+    telemetry.error(500, err);
     sendError(res, 500, 'internal_error', 'Something went wrong'); // never leak internals
   };
   app.use(onError);

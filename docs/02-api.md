@@ -13,6 +13,7 @@ loads the matching stories from MongoDB, and returns them as cards. This guide a
 | `GET /api/v1/feed?category=ai&limit=20&cursor=...` | The next page of cards, ranked |
 | `GET /api/v1/stories/:id` | One story with every source that covered it |
 | `GET /api/v1/health` | Whether MongoDB and Redis are reachable |
+| `GET /api/v1/metrics` | Operational counters and feed freshness for monitoring |
 
 **Why `/api/v1`:** if we ever change the response shape, we can add `/api/v2` without breaking app versions
 people already have installed.
@@ -111,7 +112,7 @@ npm run typecheck
 npm test
 ```
 
-You should see three test groups pass: shared (2), API (8), worker (9).
+The suite should pass; test counts change as checks are added.
 
 The API tests cover: Redis rank order, page 2 staying on its snapshot after a newer one is published, the last
 page, expired snapshots, MongoDB fallback with Redis down, input errors, story detail, and CORS.

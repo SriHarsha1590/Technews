@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { TRY_LINK_TYPES, type StoryCard, type TryLinkType } from '@technews/shared';
 import { fetchTryGuide } from '../api';
 import { timeAgo } from '../format';
+import { externalUrl } from '../externalUrl';
 import { Icon } from './Icon';
 import { Sheet, SheetHeader } from './Sheet';
 
@@ -46,9 +47,9 @@ export function TrySheet({ story, open, onClose }: Props) {
             <Icon name="check" size={14} /> Verified links
           </h4>
           <ul className="try-list">
-            {links.map((l) => (
+            {links.filter((l) => externalUrl(l.url)).map((l) => (
               <li key={l.url}>
-                <a className="try-link" href={l.url} target="_blank" rel="noopener noreferrer">
+                <a className="try-link" href={externalUrl(l.url)!} target="_blank" rel="noopener noreferrer">
                   <span className="try-label">{LABEL[l.type]}</span>
                   <span className="try-domain">Opens {l.domain}</span>
                   <span className="try-checked">Link checked {timeAgo(l.checkedAt)}</span>
@@ -94,12 +95,12 @@ export function TrySheet({ story, open, onClose }: Props) {
 
       <section className="sheet-section" aria-label="Source">
         <h4 className="section-label">Source</h4>
-        <a className="try-link source-link" href={story.primaryUrl} target="_blank" rel="noopener noreferrer">
+        {externalUrl(story.primaryUrl) && <a className="try-link source-link" href={externalUrl(story.primaryUrl)!} target="_blank" rel="noopener noreferrer">
           <span className="try-label">
             Read on {story.primarySource.name} <Icon name="external" size={14} />
           </span>
           <span className="try-domain">Opens {hostOf(story.primaryUrl)}</span>
-        </a>
+        </a>}
       </section>
     </Sheet>
   );

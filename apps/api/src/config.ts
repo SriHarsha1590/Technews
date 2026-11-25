@@ -2,10 +2,12 @@ export const config = {
   port: Number(process.env.API_PORT ?? 4000),
   mongoUrl: process.env.MONGO_URL ?? 'mongodb://localhost:27017',
   mongoDb: process.env.MONGO_DB ?? 'technews',
-  redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379',
+  redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6380',
   geminiApiKey: process.env.GEMINI_API_KEY ?? '', // empty: Watch, Try it steps and Ask answer 503
   geminiModel: process.env.GEMINI_MODEL ?? 'gemini-3.1-flash-lite',
-  llmDailyCap: Number(process.env.LLM_DAILY_CAP ?? 800), // shared with the worker through Redis
+  publicLlmDailyCap: Number(process.env.PUBLIC_LLM_DAILY_CAP ?? process.env.LLM_PUBLIC_DAILY_CAP ?? 100),
+  requestsPerMinute: Number(process.env.REQUESTS_PER_MINUTE ?? 120),
+  userRequestsPerMinute: Number(process.env.USER_REQUESTS_PER_MINUTE ?? 120),
   aiRequestsPerMinute: Number(process.env.AI_REQUESTS_PER_MINUTE ?? 20), // per reader (IP), protects the free quota
   firebaseProjectId: process.env.FIREBASE_PROJECT_ID ?? '', // empty: sign-in features answer 503
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY ?? '', // empty: notifications unavailable

@@ -10,11 +10,11 @@ do, what it does, and how to check it worked.
 
 | Tool | Version | Why we need it | Check |
 |---|---|---|---|
-| Node.js | 22.9 or newer (LTS) | Runs all our TypeScript code | `node -v` |
+| Node.js | 24.12 or newer | Runs all our TypeScript code | `node -v` |
 | Docker + Docker Compose | Docker Desktop, or Engine on Linux | Runs MongoDB, Redis and Temporal without installing them | `docker compose version` |
 | Git | any | Version control | `git --version` |
 
-**Why Node 22.9+?** Our scripts use `--env-file-if-exists`, which loads `.env` without an extra library.
+**Why Node 24.12+?** Our scripts use `--env-file-if-exists`, and current Firebase dependencies require Node 24.12+.
 
 ---
 
@@ -98,7 +98,8 @@ Open `.env` and paste your key after `GEMINI_API_KEY=`. Everything else already 
 |---|---|---|
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite` | Which model writes summaries. Google renames models; if you get "model not found", pick a current Flash-Lite id from the Gemini docs. |
 | `LLM_CALLS_PER_SECOND` | `0.1` (6 per minute) | Temporal holds AI calls to this rate across all workers, safely under free-tier limits. |
-| `LLM_DAILY_CAP` | `800` | Hard stop per day, counted in Redis. A bug can't loop and burn your quota. |
+| `WORKER_LLM_DAILY_CAP` | `800` | Daily worker allocation in Redis, reserved for scheduled ingestion. |
+| `PUBLIC_LLM_DAILY_CAP` | `100` | Separate daily allocation for public AI features. Both allocations count against your Gemini quota. |
 
 `.env` is in `.gitignore`, so your key never gets committed.
 

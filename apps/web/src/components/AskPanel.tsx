@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import type { CitedStory, StoryCard } from '@technews/shared';
 import { askQuestion } from '../api';
 import { suggestions } from '../suggestions';
+import { externalUrl } from '../externalUrl';
 import { Icon } from './Icon';
 import { Sheet, SheetHeader } from './Sheet';
 
@@ -117,8 +118,8 @@ export function AskPanel({ open, onClose, stories, focus, onClearFocus, onShowSt
                   }
                   // Found by search, not loaded in the feed: open the source article instead.
                   const c = m.cited?.find((x) => x.id === id);
-                  return c ? (
-                    <a key={id} className="cited-story" href={c.primaryUrl} target="_blank" rel="noopener noreferrer" title={`Opens ${c.sourceName}`}>
+                  return c && externalUrl(c.primaryUrl) ? (
+                    <a key={id} className="cited-story" href={externalUrl(c.primaryUrl)!} target="_blank" rel="noopener noreferrer" title={`Opens ${c.sourceName}`}>
                       {c.title}
                     </a>
                   ) : null;

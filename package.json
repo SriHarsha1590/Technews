@@ -17,14 +17,21 @@
     "web": "npm run dev -w @technews/web",
     "try-links": "npm run run-once -w @technews/worker -- try-links",
     "refresh": "npm run run-once -w @technews/worker -- refresh",
-    "digest": "npm run run-once -w @technews/worker -- digest"
+    "digest": "npm run run-once -w @technews/worker -- digest",
+    "lint": "biome lint apps/api/src apps/worker/src apps/web/src packages/shared/src deploy/mongo-init.js",
+    "format:check": "biome format package.json biome.json apps/api/tsconfig.build.json apps/worker/tsconfig.build.json packages/shared/tsconfig.build.json apps/api/src/telemetry.ts apps/worker/src/ops-log.ts apps/web/src/externalUrl.ts packages/shared/src/safe-fetch.ts packages/shared/src/retention.ts",
+    "coverage": "node --experimental-test-coverage --test-coverage-lines=65 --test-coverage-branches=80 --test-coverage-functions=55 --import tsx --test apps/api/src/*.test.ts apps/worker/src/*.test.ts apps/web/src/*.test.ts packages/shared/src/*.test.ts"
   },
   "engines": {
-    "node": ">=22.9"
+    "node": ">=24.12.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.3.10",
     "@types/node": "~26.6.5",
     "tsx": "~4.23.15",
     "typescript": "~7.0.2"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "1.14.7"
   }
 }

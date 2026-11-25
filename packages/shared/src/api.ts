@@ -123,8 +123,17 @@ export const DigestUpdate = z.object({
   timeZone: z.string().max(64).refine(isTimeZone, 'must be a valid IANA time zone'),
 });
 
+const PUSH_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'push.services.mozilla.com', 'web.push.apple.com'];
+
 export const PushSubscriptionBody = z.object({
-  endpoint: z.string().url().max(1000).refine((u) => u.startsWith('https://'), 'must be https'),
+  endpoint: z.string().url().max(1000).refine((value) => {
+    try {
+      const url = new URL(value);
+      const host = url.hostname.toLowerCase();
+      return url.protocol === 'https:' && !url.username && !url.password && url.port === '' &&
+        (PUSH_HOSTS.includes(host) || host.endsWith('.notify.windows.com'));
+    } catch { return false; }
+  }, 'must use a known push service'),
   keys: z.object({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }),
 });
 

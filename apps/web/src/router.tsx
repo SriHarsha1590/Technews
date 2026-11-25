@@ -2,9 +2,9 @@
 // The server (Nginx, Vite) answers every path with index.html.
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from 'react';
 
-export type Page = 'feed' | 'saved' | 'history' | 'profile' | 'signin';
+export type Page = 'feed' | 'saved' | 'history' | 'profile' | 'signin' | 'admin' | 'welcome' | 'story';
 
-const PATHS: Record<string, Page> = { '/': 'feed', '/saved': 'saved', '/history': 'history', '/profile': 'profile', '/signin': 'signin' };
+const PATHS: Record<string, Page> = { '/': 'feed', '/saved': 'saved', '/history': 'history', '/profile': 'profile', '/signin': 'signin', '/admin': 'admin', '/welcome': 'welcome', '/story': 'story' };
 
 const CHANGE = 'technews:navigate';
 

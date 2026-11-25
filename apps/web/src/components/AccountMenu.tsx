@@ -14,7 +14,7 @@ export function Avatar({ user, large = false }: { user: AuthUser; large?: boolea
 }
 
 /** Top-right account button. The native popover closes on Escape and on a tap outside. */
-export function AccountMenu({ user }: { user: AuthUser }) {
+export function AccountMenu({ user, admin = false }: { user: AuthUser; admin?: boolean }) {
   const { signOut } = useAuth();
   const menu = useRef<HTMLDivElement>(null);
   const close = () => menu.current?.hidePopover();
@@ -33,6 +33,7 @@ export function AccountMenu({ user }: { user: AuthUser }) {
           </div>
         </div>
         <nav aria-label="Your account">
+          {admin && <Link href="/admin" onClick={close}>Admin dashboard</Link>}
           <Link href="/profile" onClick={close}><Icon name="user" />Profile</Link>
           <Link href="/saved" onClick={close}><Icon name="save" />Saved</Link>
           <Link href="/history" onClick={close}><Icon name="history" />History</Link>

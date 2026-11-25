@@ -75,6 +75,41 @@ test('the card fits the screen with nothing cut off on the right', async ({ page
   }
 });
 
+test('long phone cards keep the main actions in view', async ({ page: p }) => {
+  test.skip((p.viewportSize()?.width ?? 0) > 520, 'Phone layout only');
+  await p.setViewportSize({ width: 393, height: 650 });
+  await p.route('https://images.example.com/**', (route) => route.fulfill({ status: 404 }));
+  await mockFeed(p, () => page([story(1, {
+    imageUrl: 'https://images.example.com/hero.jpg',
+    summary: 'This story explains a software release and how developers can use it. '.repeat(18),
+  })]));
+  await p.goto('/');
+  const card = p.getByRole('article').first();
+  await expect(card).toBeVisible();
+  const viewport = p.viewportSize()!;
+  for (const name of ['Try it', 'Watch', 'Ask']) {
+    const box = (await card.getByRole('button', { name, exact: true }).boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+  }
+});
+
+test('signed-out header fits phone and desktop without clipping or wrapping', async ({ page: p }) => {
+  const mobile = (p.viewportSize()?.width ?? 0) <= 520;
+  await p.setViewportSize(mobile ? { width: 320, height: 640 } : { width: 1440, height: 900 });
+  await p.addInitScript(() => { window.__TECHNEWS_TEST_AUTH__ = { user: null }; });
+  await mockFeed(p, () => page([story(1)]));
+  await p.goto('/');
+  const viewport = p.viewportSize()!;
+  for (const control of [p.getByRole('button', { name: 'Refresh stories' }), p.getByRole('button', { name: 'Ask the feed' }), p.getByRole('link', { name: 'Sign in' })]) {
+    const box = (await control.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  }
+  const signIn = (await p.getByRole('link', { name: 'Sign in' }).boundingBox())!;
+  expect(signIn.height).toBeLessThanOrEqual(42);
+  expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+});
+
 test('Try it works on every card: AI steps without links, then the source article', async ({ page: p }) => {
   await mockFeed(p, () => page([story(1)]));
   await p.route('**/api/v1/stories/*/try-guide', (route) =>
@@ -213,17 +248,52 @@ test('switching category asks the API for that category and updates the URL', as
   await expect(p).toHaveURL(/\?category=ai$/);
 });
 
+test('reader refresh loads published stories without starting the pipeline', async ({ page: p }) => {
+  let newerPublished = false;
+  let pipelineCalls = 0;
+  await mockFeed(p, () => page(newerPublished ? [story(2), story(1)] : [story(1)]));
+  await p.route('**/api/v1/refresh', (route) => {
+    pipelineCalls++;
+    return route.fulfill({ status: 500 });
+  });
+  await p.goto('/');
+  await expect(p.getByRole('heading', { name: /Story number 1/ })).toBeVisible();
+
+  newerPublished = true;
+  await p.getByRole('button', { name: 'Refresh stories' }).click();
+  await expect(p.getByRole('heading', { name: /Story number 2/ })).toBeVisible();
+  await expect(p.getByText('Latest stories loaded.')).toBeVisible();
+
+  await p.getByRole('button', { name: 'Refresh stories' }).click();
+  await expect(p.getByText("You're up to date.")).toBeVisible();
+  expect(pipelineCalls).toBe(0);
+});
+
 test('opening a shared link restores the category', async ({ page: p }) => {
   await mockFeed(p, (url) => page([story(1, { title: `Feed was ${url.searchParams.get('category')}` })]));
   await p.goto('/?category=security');
   await expect(p.getByRole('heading', { name: 'Feed was security' })).toBeVisible();
 });
 
+test('browser title follows the current feed view', async ({ page: p }) => {
+  await mockFeed(p, () => page([story(1)]));
+  await p.goto('/?category=ai');
+  await expect(p).toHaveTitle('AI stories · TechNews');
+  await p.getByRole('button', { name: 'Tools', exact: true }).click();
+  await expect(p).toHaveTitle('Tools stories · TechNews');
+});
+
+test('a shared story uses its headline as the browser title', async ({ page: p }) => {
+  await p.route('**/api/v1/stories/*', (route) => route.fulfill({ json: { data: story(1) } }));
+  await p.goto(`/story?id=${story(1).id}`);
+  await expect(p).toHaveTitle('Story number 1 ships something new · TechNews');
+});
+
 test('empty category explains when stories will appear', async ({ page: p }) => {
   await mockFeed(p, () => page([]));
   await p.goto('/?category=research');
   await expect(p.getByText('No Research stories yet.')).toBeVisible();
-  await expect(p.getByText('New stories are added every 5 minutes.')).toBeVisible();
+  await expect(p.getByText('The news pipeline checks sources every 5 minutes.')).toBeVisible();
 });
 
 test('server error shows what happened and recovers with Try again', async ({ page: p }) => {
@@ -231,7 +301,7 @@ test('server error shows what happened and recovers with Try again', async ({ pa
   await mockFeed(p, () => (++calls <= 2 ? { status: 500 } : page([story(1)]))); // the app retries once by itself
   await p.goto('/');
 
-  await expect(p.getByRole('alert')).toContainText('Something went wrong');
+  await expect(p.getByRole('alert')).toContainText('We could not load stories right now.');
   await p.getByRole('button', { name: 'Try again' }).click();
   await expect(p.getByRole('heading', { name: /Story number 1/ })).toBeVisible();
 });

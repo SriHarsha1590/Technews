@@ -10,6 +10,13 @@ test('different events stay apart even with a shared company name', () => {
   assert.ok(!sameStory('Google launches Gemini 4 Pro', 'Google cuts 200 jobs in cloud unit'));
 });
 
+test('similar announcements for different model versions stay apart', () => {
+  assert.ok(!sameStory('OpenAI releases GPT-6 Astra model for developers', 'OpenAI releases GPT-5 Astra model for developers'));
+  assert.ok(!sameStory('Node.js 26 released with native TypeScript support', 'Node.js 24 released with native TypeScript support'));
+  assert.ok(!sameStory('Google launches Gemini 4 Pro for developers', 'Google launches Gemini 4 Flash for developers'));
+  assert.ok(!sameStory('Apple unveils MacBook Air M4 with new design', 'Apple unveils MacBook Pro M4 with new design'));
+});
+
 test('groups headlines by event', () => {
   const groups = groupByTitle([
     { title: 'Node.js 26 released with native TypeScript support' },

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { verifyPicks, type StoryCandidates } from './activities/trylinks';
+import { classifyTryLinks, verifyPicks, type StoryCandidates } from './activities/trylinks';
 import { pageContext } from './trust';
 
 const page = pageContext('https://openai.com/index/astra-6/', 'official');
@@ -26,4 +26,9 @@ test('keeps verified picks in priority order, falls back when a pick is dead, ig
     ['docs', 'https://platform.openai.com/docs/astra', 'platform.openai.com'],
   ]);
   assert.deepEqual(rejected, [{ url: 'https://openai.com/dead-docs', reason: 'HTTP 404' }]);
+});
+
+test('provider outage defers link classification so the refresh can finish', async () => {
+  const result = await classifyTryLinks([story], async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); });
+  assert.deepEqual(result, { picks: [], capped: false, unavailable: true });
 });

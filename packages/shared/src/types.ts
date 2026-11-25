@@ -107,6 +107,7 @@ export interface BookmarkDoc {
   _id: string; // `${userId}:${storyId}`: saving twice can't create a duplicate
   userId: string;
   storyId: string;
+  story?: StoryCard; // saved snapshot survives story retention; absent for pre-migration records
   createdAt: Date;
 }
 

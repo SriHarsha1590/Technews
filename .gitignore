@@ -16,6 +16,25 @@ npm-debug.log*
 test-results/
 playwright-report/
 backups/
+*.archive.gz
+*.bson
+*.dump
+*.sqlite
+*.sqlite-journal
+
+# local credentials and deployment keys
+.aws/
+.ssh/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# local agent state and scratch planning notes
+.codex/
+.aider-desk/
+Requirement
+todo-readme.txt
 
 # editor / OS
 .vscode/

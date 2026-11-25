@@ -1,7 +1,8 @@
 import { MongoClient, type Collection, type Db } from 'mongodb';
 import { createClient } from 'redis';
-import type { Article, Story } from '@technews/shared';
+import { CONTENT_RETENTION_INDEXES, type Article, type Story } from '@technews/shared';
 import { config } from './config';
+import { opsLog } from './ops-log';
 
 let mongo: MongoClient | undefined;
 let redis: ReturnType<typeof createClient> | undefined;
@@ -20,7 +21,7 @@ export const stories = async (): Promise<Collection<Story>> => (await database()
 export async function getRedis() {
   if (!redis) {
     redis = createClient({ url: config.redisUrl });
-    redis.on('error', (err) => console.error('redis error', err));
+    redis.on('error', (err) => opsLog('error', 'redis_error', { errorName: err instanceof Error ? err.name : 'UnknownError' }));
     await redis.connect();
   }
   return redis;
@@ -30,6 +31,7 @@ export async function ensureIndexes(): Promise<void> {
   await (await articles()).createIndexes([
     { key: { status: 1, fetchedAt: 1 } }, // summarizer picks up 'new' articles, oldest first
     { key: { storyId: 1 } },
+    CONTENT_RETENTION_INDEXES.articles,
   ]);
   await (await stories()).createIndexes([
     { key: { publishedAt: -1 } }, // feed rebuild + story matching window
@@ -37,6 +39,7 @@ export async function ensureIndexes(): Promise<void> {
     { key: { tryCheckedAt: 1, publishedAt: -1 } }, // try-links workflow finds unsearched stories
     { key: { 'tryLinks.checkedAt': 1 } }, // weekly re-check
     { key: { imageCheckedAt: 1, publishedAt: -1 } }, // image search finds stories it hasn't looked at
+    CONTENT_RETENTION_INDEXES.stories,
   ]);
 }
 

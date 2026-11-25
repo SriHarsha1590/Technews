@@ -2,36 +2,32 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkLink } from './check';
 
-// Fake fetch: a map of URL -> [status, location?]
-function fakeFetch(routes: Record<string, [number, string?]>): typeof fetch {
-  return (async (input: string | URL | Request) => {
-    const [status, location] = routes[input.toString()] ?? [404];
-    return new Response(null, { status, headers: location ? { location } : {} });
-  }) as typeof fetch;
-}
-const onOpenAI = (u: URL) => u.hostname.endsWith('openai.com');
+const onOpenAI = (u: URL) => u.hostname === 'openai.com' || u.hostname === 'platform.openai.com';
+const status = (code: number, finalUrl: string) => async () => ({ status: code, finalUrl });
 
-test('a working page passes', async () => {
-  const r = await checkLink('https://platform.openai.com/playground', onOpenAI, fakeFetch({ 'https://platform.openai.com/playground': [200] }));
-  assert.equal(r.ok, true);
+test('a successful exact page passes', async () => {
+  assert.deepEqual(await checkLink('https://openai.com/try', onOpenAI, status(200, 'https://openai.com/try')),
+    { ok: true, finalUrl: 'https://openai.com/try' });
 });
 
-test('redirects are followed while they stay on the allowed site', async () => {
-  const r = await checkLink('https://openai.com/try', onOpenAI, fakeFetch({
-    'https://openai.com/try': [301, 'https://platform.openai.com/playground'],
-    'https://platform.openai.com/playground': [200],
-  }));
-  assert.deepEqual(r, { ok: true, finalUrl: 'https://platform.openai.com/playground' });
+test('a successful redirect within the allowed site passes', async () => {
+  assert.deepEqual(await checkLink('https://openai.com/try', onOpenAI, status(200, 'https://platform.openai.com/playground')),
+    { ok: true, finalUrl: 'https://platform.openai.com/playground' });
 });
 
-test('a redirect to another site is rejected', async () => {
-  const r = await checkLink('https://openai.com/get', onOpenAI, fakeFetch({ 'https://openai.com/get': [302, 'https://cheap-downloads.example/astra.exe'] }));
-  assert.equal(r.ok, false);
-  assert.match(r.reason!, /off the official site/);
+test('a redirect outside the trust policy fails', async () => {
+  const result = await checkLink('https://openai.com/try', onOpenAI, status(200, 'https://evil.example/download'));
+  assert.equal(result.ok, false);
 });
 
-test('dead pages fail, bot-blocked pages still count as existing', async () => {
-  const f = fakeFetch({ 'https://openai.com/gone': [404], 'https://openai.com/blocked': [403] });
-  assert.equal((await checkLink('https://openai.com/gone', onOpenAI, f)).ok, false);
-  assert.equal((await checkLink('https://openai.com/blocked', onOpenAI, f)).ok, true);
+test('authentication and rate-limit responses do not count as verified', async () => {
+  for (const code of [401, 403, 429, 404, 500]) {
+    const result = await checkLink('https://openai.com/try', onOpenAI, status(code, 'https://openai.com/try'));
+    assert.deepEqual(result, { ok: false, reason: `HTTP ${code}` });
+  }
+});
+
+test('unsafe network destinations fail closed', async () => {
+  assert.equal((await checkLink('https://openai.com/try', onOpenAI, async () => null)).ok, false);
+  assert.equal((await checkLink('https://evil.example/try', onOpenAI, status(200, 'https://evil.example/try'))).ok, false);
 });

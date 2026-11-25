@@ -8,7 +8,7 @@ services:
 
   redis:
     image: redis:8
-    ports: ["${REDIS_PORT:-6379}:6379"]
+    ports: ["127.0.0.1:${REDIS_PORT:-6380}:6379"]
 
   temporal:
     image: temporalio/temporal:latest  # Temporal CLI dev server; not for production

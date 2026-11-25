@@ -29,15 +29,19 @@ export async function getFeedPage(q: FeedQuery, feeds: FeedStore, stories: Story
     }
     if (ids !== null && version) {
       const cards = await stories.cardsByIds(ids.slice(0, q.limit));
-      return {
-        cards,
-        nextCursor: ids.length > q.limit ? encodeCursor({ v: version, o: offset + q.limit }) : null,
-        servedFrom: 'redis',
-        cacheControl: q.cursor ? CACHE.laterPage : CACHE.firstPage,
-      };
+      // A snapshot can outlive its MongoDB stories after retention or a reset.
+      // Do not present that stale snapshot as an empty feed while stories exist.
+      if (cards.length || ids.length === 0) {
+        return {
+          cards,
+          nextCursor: ids.length > q.limit ? encodeCursor({ v: version, o: offset + q.limit }) : null,
+          servedFrom: 'redis',
+          cacheControl: q.cursor ? CACHE.laterPage : CACHE.firstPage,
+        };
+      }
     }
   } catch (err) {
-    console.warn('redis unavailable, serving feed from mongo', err);
+    console.warn(JSON.stringify({ time: new Date().toISOString(), event: 'feed_redis_fallback', errorName: err instanceof Error ? err.name : 'UnknownError' }));
   }
 
   const docs = await stories.topByScore(q.category, offset, q.limit + 1);

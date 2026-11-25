@@ -19,7 +19,8 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL(event.notification.data.url, self.location.origin).href;
+  const target = new URL(event.notification.data.url || '/', self.location.origin);
+  const url = target.origin === self.location.origin ? target.href : self.location.origin;
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((open) => {
       const tab = open.find((c) => c.url.startsWith(self.location.origin));

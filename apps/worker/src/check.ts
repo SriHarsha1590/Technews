@@ -1,4 +1,6 @@
-// Confirms a link still works and doesn't redirect somewhere we wouldn't trust.
+// Confirms an exact link with the shared network boundary. Every redirect is
+// resolved, checked against the trust rule, and pinned to a public IP.
+import { safeFetchStatus, type SafeFetchOptions } from '@technews/shared/safe-fetch';
 import { USER_AGENT } from './config';
 
 export interface CheckResult {
@@ -7,34 +9,22 @@ export interface CheckResult {
   reason?: string;
 }
 
-// Sites often block bots with 401/403/429 even though the page exists. Those prove the page is there;
-// 404, 410 and 5xx do not.
-const REACHABLE = (status: number) => (status >= 200 && status < 300) || status === 401 || status === 403 || status === 429;
+type StatusCheck = (url: string, options: SafeFetchOptions) => Promise<{ status: number; finalUrl: string } | null>;
 
 export async function checkLink(
   url: string,
   isAllowed: (u: URL) => boolean,
-  fetchImpl: typeof fetch = fetch,
+  check: StatusCheck = safeFetchStatus,
 ): Promise<CheckResult> {
-  let current = new URL(url);
-  for (let hop = 0; hop <= 5; hop++) {
-    if (current.protocol !== 'https:' || !isAllowed(current)) {
-      return { ok: false, reason: hop === 0 ? 'not an allowed site' : `redirects off the official site to ${current.hostname}` };
-    }
-    let res: Response;
-    try {
-      res = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': USER_AGENT } });
-    } catch (err) {
-      return { ok: false, reason: `unreachable (${(err as Error).message})` };
-    }
-    await res.body?.cancel().catch(() => {}); // we only need the status
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (!location) return { ok: false, reason: `redirect ${res.status} without a location` };
-      current = new URL(location, current);
-      continue;
-    }
-    return REACHABLE(res.status) ? { ok: true, finalUrl: current.toString() } : { ok: false, reason: `HTTP ${res.status}` };
+  try {
+    const initial = new URL(url);
+    if (initial.protocol !== 'https:' || !isAllowed(initial)) return { ok: false, reason: 'not an allowed site' };
+    const result = await check(url, { userAgent: USER_AGENT, timeoutMs: 10_000, isAllowed });
+    if (!result || !isAllowed(new URL(result.finalUrl))) return { ok: false, reason: 'unreachable or unsafe destination' };
+    return result.status >= 200 && result.status < 300
+      ? { ok: true, finalUrl: result.finalUrl }
+      : { ok: false, reason: `HTTP ${result.status}` };
+  } catch (error) {
+    return { ok: false, reason: `unreachable (${error instanceof Error ? error.message : String(error)})` };
   }
-  return { ok: false, reason: 'too many redirects' };
 }

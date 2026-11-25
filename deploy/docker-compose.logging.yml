@@ -1,0 +1,17 @@
+# Compose override: include after docker-compose.prod.yml with -f.
+# The Docker daemon must reach this off-host Fluentd endpoint.
+services:
+  api:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: ${FLUENTD_ADDRESS:?set FLUENTD_ADDRESS to host:port}
+        fluentd-async: "true"
+        tag: technews.api
+  worker:
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: ${FLUENTD_ADDRESS:?set FLUENTD_ADDRESS to host:port}
+        fluentd-async: "true"
+        tag: technews.worker

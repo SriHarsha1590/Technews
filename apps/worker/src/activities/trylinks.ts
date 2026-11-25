@@ -1,12 +1,14 @@
 import { log } from '@temporalio/activity';
 import { z } from 'zod';
 import { TRY_LINK_TYPES, type Story, type StorySource, type TryLink, type TryLinkType } from '@technews/shared';
+import { safeFetchHtml } from '@technews/shared/safe-fetch';
 import { stories } from '../db';
 import { extractLinks } from '../links';
 import { checkLink } from '../check';
 import { isTrustedLink, pageContext, siteOf, type PageContext } from '../trust';
 import { generateJson, DailyCapReached } from '../llm';
 import { USER_AGENT } from '../config';
+import { opsLog } from '../ops-log';
 
 const LOOKBACK_HOURS = 72;
 const PAGES_PER_STORY = 2;
@@ -29,6 +31,7 @@ export interface StoryCandidates {
 export interface PickResult {
   picks: { storyId: string; links: { n: number; type: TryLinkType }[] }[];
   capped: boolean;
+  unavailable: boolean;
 }
 
 // ---------- Step 1: which stories still need searching ----------
@@ -49,16 +52,6 @@ export async function loadStoriesNeedingTryLinks(limit: number, ids?: string[]):
 
 // ---------- Step 2: read the source pages and list their links ----------
 
-async function fetchHtml(url: string): Promise<string> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': USER_AGENT } });
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('text/html')) return '';
-    return (await res.text()).slice(0, 1_000_000);
-  } catch {
-    return '';
-  }
-}
-
 const tierOrder = (s: StorySource) => ['official', 'press', 'community'].indexOf(s.trustTier);
 
 export async function collectLinkCandidates(list: Pick<Story, '_id' | 'title' | 'summary' | 'sources'>[]): Promise<StoryCandidates[]> {
@@ -69,7 +62,7 @@ export async function collectLinkCandidates(list: Pick<Story, '_id' | 'title' | 
     const seen = new Set<string>();
     for (const source of pages) {
       const page = pageContext(source.url, source.trustTier);
-      for (const link of extractLinks(await fetchHtml(source.url), source.url)) {
+      for (const link of extractLinks(await safeFetchHtml(source.url, { userAgent: USER_AGENT }), source.url)) {
         if (seen.has(link.url)) continue;
         // Drop links that could never pass the rules, so the AI doesn't spend effort on them.
         const url = new URL(link.url);
@@ -111,18 +104,23 @@ Return a JSON array: [{"index": <story number>, "picks": [{"link": <link number>
 ${stories}`;
 }
 
-export async function classifyTryLinks(batch: StoryCandidates[]): Promise<PickResult> {
+export async function classifyTryLinks(batch: StoryCandidates[], generate: typeof generateJson = generateJson): Promise<PickResult> {
   let raw: unknown;
   try {
-    raw = await generateJson(buildPrompt(batch), PickResponse);
+    raw = await generate(buildPrompt(batch), PickResponse);
   } catch (err) {
-    if (err instanceof DailyCapReached) return { picks: [], capped: true };
+    if (err instanceof DailyCapReached) return { picks: [], capped: true, unavailable: false };
+    if (Number((err as { status?: unknown })?.status) === 503) {
+      opsLog('warn', 'try_links_deferred', { stories: batch.length });
+      return { picks: [], capped: false, unavailable: true };
+    }
     throw err;
   }
   const parsed = PickResponse.safeParse(raw);
   const items = parsed.success ? parsed.data : [];
   return {
     capped: false,
+    unavailable: false,
     picks: batch.map((s, i) => ({
       storyId: s.storyId,
       links: (items.find((x) => x.index === i)?.picks ?? []).map((p) => ({ n: p.link, type: p.type })),

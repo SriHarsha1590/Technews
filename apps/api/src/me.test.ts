@@ -20,7 +20,8 @@ const all = [card(1, ['react']), card(2, ['node.js']), card(3, ['react', 'vite']
 // ---- fakes ----
 let stacks: Map<string, string[]>;
 let digests: Map<string, DigestSettings>;
-let saved: Map<string, string[]>; // uid -> storyIds, newest first
+let saved: Map<string, StoryCard[]>; // uid -> saved cards, newest first
+let available: StoryCard[];
 let pushes: Map<string, string>; // endpoint -> uid
 let read: Map<string, HistoryEntry[]>; // uid -> entries, newest read first
 
@@ -28,13 +29,14 @@ const users: UserStore = {
   async me(uid) { return { uid, stack: stacks.get(uid) ?? [], digest: digests.get(uid) ?? { ...DEFAULT_DIGEST } }; },
   async setStack(uid, stack) { stacks.set(uid, stack); },
   async setDigest(uid, d) { digests.set(uid, d); },
-  async bookmarkIds(uid) { return saved.get(uid) ?? []; },
+  async bookmarkIds(uid) { return (saved.get(uid) ?? []).map((s) => s.id); },
   async bookmarkPage(uid, offset, count) { return (saved.get(uid) ?? []).slice(offset, offset + count); },
-  async addBookmark(uid, storyId) {
+  async addBookmark(uid, story) {
+    const storyId = story.id;
     const list = saved.get(uid) ?? [];
-    if (!list.includes(storyId)) saved.set(uid, [storyId, ...list]);
+    if (!list.some((s) => s.id === storyId)) saved.set(uid, [story, ...list]);
   },
-  async removeBookmark(uid, storyId) { saved.set(uid, (saved.get(uid) ?? []).filter((s) => s !== storyId)); },
+  async removeBookmark(uid, storyId) { saved.set(uid, (saved.get(uid) ?? []).filter((s) => s.id !== storyId)); },
   async recordRead(uid, story, watched) {
     const now = new Date().toISOString();
     const list = read.get(uid) ?? [];
@@ -55,7 +57,7 @@ const users: UserStore = {
   async removePush(uid, endpoint) { if (pushes.get(endpoint) === uid) pushes.delete(endpoint); },
 };
 const stories: StoryStore = {
-  async cardsByIds(ids) { return ids.flatMap((i) => all.filter((s) => s.id === i)); },
+  async cardsByIds(ids) { return ids.flatMap((i) => available.filter((s) => s.id === i)); },
   async topByScore() { return []; },
   async detail() { return null; },
   async byTags(tags, _since, offset, count) { return all.filter((s) => s.tags.some((t) => tags.includes(t))).slice(offset, offset + count); },
@@ -80,6 +82,7 @@ beforeEach(() => {
   stacks = new Map();
   digests = new Map();
   saved = new Map();
+  available = [...all];
   pushes = new Map();
   read = new Map();
 });
@@ -142,6 +145,13 @@ test('saving an unknown or malformed story id fails clearly', async () => {
   assert.equal((await call('PUT', '/me/bookmarks/nope', { token: 'good-u1' })).status, 400);
 });
 
+test('saved card remains visible when its source story expires', async () => {
+  await call('PUT', `/me/bookmarks/${id(1)}`, { token: 'good-u1' });
+  available = available.filter((s) => s.id !== id(1));
+  const result = await call('GET', '/me/bookmarks', { token: 'good-u1' });
+  assert.equal(result.body.data[0].title, 'Story 1');
+});
+
 test('history: reading records the story, rereading moves it up, and it is private to each reader', async () => {
   assert.equal((await call('PUT', `/me/history/${id(1)}`, { token: 'good-u1' })).status, 204);
   await call('PUT', `/me/history/${id(3)}`, { token: 'good-u1', body: { watched: true } });
@@ -180,10 +190,11 @@ test('digest settings validate the hour and time zone', async () => {
 });
 
 test('push: https subscriptions are stored, others rejected; public key is served', async () => {
-  const sub = { endpoint: 'https://push.example.com/abc', keys: { p256dh: 'p', auth: 'a' } };
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: 'p', auth: 'a' } };
   assert.equal((await call('POST', '/me/push', { token: 'good-u1', body: sub })).status, 204);
   assert.equal(pushes.get(sub.endpoint), 'u1');
   assert.equal((await call('POST', '/me/push', { token: 'good-u1', body: { ...sub, endpoint: 'http://push.example.com/x' } })).status, 400);
+  assert.equal((await call('POST', '/me/push', { token: 'good-u1', body: { ...sub, endpoint: 'https://push.example.com/x' } })).status, 400);
   assert.equal((await call('DELETE', '/me/push', { token: 'good-u1', body: { endpoint: sub.endpoint } })).status, 204);
   assert.equal(pushes.size, 0);
   assert.equal((await call('GET', '/push/public-key')).body.data.publicKey, 'PUBKEY');

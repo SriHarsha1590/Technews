@@ -1,7 +1,8 @@
 import { MongoClient } from 'mongodb';
 import { createClient } from 'redis';
+import { safeFetchHtml } from '@technews/shared/safe-fetch';
 import { createApp } from './app';
-import { ensureStoryTextIndex, mongoAssistStore, mongoStoryStore, redisFeedStore } from './stores';
+import { ensureContentRetentionIndexes, ensureStoryTextIndex, mongoAssistStore, mongoStoryStore, redisFeedStore } from './stores';
 import { ensureUserIndexes, mongoUserStore } from './users';
 import { firebaseVerifier } from './auth';
 import { geminiAi } from './ai';
@@ -10,19 +11,14 @@ import { config, USER_AGENT } from './config';
 
 /** HTML of one of our stories' source pages, or '' if it can't be read. Never called with reader-supplied URLs. */
 async function fetchHtml(url: string): Promise<string> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000), headers: { 'User-Agent': USER_AGENT } });
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('text/html')) return '';
-    return (await res.text()).slice(0, 1_000_000);
-  } catch {
-    return '';
-  }
+  return safeFetchHtml(url, { timeoutMs: 10_000, userAgent: USER_AGENT });
 }
 
 async function main() {
   const mongo = new MongoClient(config.mongoUrl);
   await mongo.connect();
   await ensureUserIndexes(mongo, config.mongoDb);
+  await ensureContentRetentionIndexes(mongo, config.mongoDb);
   await ensureStoryTextIndex(mongo, config.mongoDb).catch((err) => console.warn('could not create the story search index', err.message));
 
   const redis = createClient({ url: config.redisUrl });
@@ -30,7 +26,7 @@ async function main() {
   await redis.connect().catch((err) => console.warn('redis not reachable at startup', err.message));
 
   if (!config.geminiApiKey) console.warn('GEMINI_API_KEY is not set: Watch, Try it steps and Ask will be unavailable');
-  const ai = geminiAi({ apiKey: config.geminiApiKey, model: config.geminiModel, dailyCap: config.llmDailyCap, redis });
+  const ai = geminiAi({ apiKey: config.geminiApiKey, model: config.geminiModel, dailyCap: config.publicLlmDailyCap, redis });
 
   if (!config.firebaseProjectId) console.warn('FIREBASE_PROJECT_ID is empty: sign-in features are off (see docs/05-accounts.md)');
   if (!config.vapidPublicKey) console.warn('VAPID_PUBLIC_KEY is empty: notifications are off (see docs/05-accounts.md)');
@@ -45,6 +41,8 @@ async function main() {
     webOrigins: config.webOrigins,
     vapidPublicKey: config.vapidPublicKey,
     aiRequestsPerMinute: config.aiRequestsPerMinute,
+    requestsPerMinute: config.requestsPerMinute,
+    userRequestsPerMinute: config.userRequestsPerMinute,
     trustProxy: config.trustProxy,
     refreshAdminUids: config.refreshAdminUids,
     sharedCounter: async (key) => {

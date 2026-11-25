@@ -1,10 +1,12 @@
 import { NativeConnection, Worker } from '@temporalio/worker';
+import { writeFileSync } from 'node:fs';
 import { loadClientConnectConfig } from '@temporalio/envconfig';
 import * as activities from './activities';
 import { ensureIndexes, closeConnections } from './db';
 import { config, TASK_QUEUE, LLM_TASK_QUEUE } from './config';
 import { getClient } from './client';
 import { ensureSchedules } from './schedules';
+import { opsLog } from './ops-log';
 
 async function run() {
   await ensureIndexes();
@@ -34,21 +36,25 @@ async function run() {
   try {
     await ensureSchedules(client);
   } catch (err) {
-    console.warn('could not set up schedules; run `npm run schedules` later', err);
+    opsLog('warn', 'schedule_setup_failed', { errorName: err instanceof Error ? err.name : 'UnknownError' });
   } finally {
     await client.connection.close();
   }
 
-  console.log(`Worker running. Queues: ${TASK_QUEUE}, ${LLM_TASK_QUEUE} (${config.llmCallsPerSecond} AI calls/sec, model ${config.geminiModel})`);
+  opsLog('info', 'worker_started', { taskQueue: TASK_QUEUE, llmTaskQueue: LLM_TASK_QUEUE, callsPerSecond: config.llmCallsPerSecond, model: config.geminiModel });
+  const heartbeat = () => writeFileSync('/tmp/technews-worker-health', String(Date.now()));
+  heartbeat();
+  const heartbeatTimer = setInterval(heartbeat, 20_000);
   try {
     await Promise.all([main.run(), llm.run()]);
   } finally {
+    clearInterval(heartbeatTimer);
     await connection.close();
     await closeConnections();
   }
 }
 
 run().catch((err) => {
-  console.error(err);
+  opsLog('error', 'worker_failed', { errorName: err instanceof Error ? err.name : 'UnknownError' });
   process.exit(1);
 });

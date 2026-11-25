@@ -2,6 +2,7 @@
 import { ScheduleOverlapPolicy, ScheduleAlreadyRunning, ScheduleNotFoundError, type Client } from '@temporalio/client';
 import { getClient } from './client';
 import { TASK_QUEUE } from './config';
+import { opsLog } from './ops-log';
 
 const SCHEDULES = [
   // ingest -> summarize -> images -> Try it links -> rank, all in one run (refreshWorkflow)
@@ -27,17 +28,17 @@ export async function ensureSchedules(client: Client): Promise<void> {
     const policies = { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' }; // never pile up runs, even after downtime
     try {
       await client.schedule.create({ scheduleId: s.id, spec, action, policies });
-      console.log(`Created schedule "${s.id}": every ${s.every}`);
+      opsLog('info', 'schedule_created', { schedule: s.id, every: s.every });
     } catch (err) {
       if (!(err instanceof ScheduleAlreadyRunning)) throw err;
       await client.schedule.getHandle(s.id).update((prev) => ({ ...prev, spec, action, policies: { ...prev.policies, ...policies } }));
-      console.log(`Schedule "${s.id}": every ${s.every}`);
+      opsLog('info', 'schedule_updated', { schedule: s.id, every: s.every });
     }
   }
   for (const id of RETIRED) {
     try {
       await client.schedule.getHandle(id).delete();
-      console.log(`Deleted old schedule "${id}"`);
+      opsLog('info', 'schedule_deleted', { schedule: id });
     } catch (err) {
       if (!(err instanceof ScheduleNotFoundError)) throw err;
     }
@@ -50,7 +51,7 @@ if (require.main === module) {
     await ensureSchedules(client);
     await client.connection.close();
   })().catch((err) => {
-    console.error(err);
+    opsLog('error', 'schedule_setup_failed', { errorName: err instanceof Error ? err.name : 'UnknownError' });
     process.exit(1);
   });
 }

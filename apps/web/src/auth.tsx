@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 // Sign-in state for the whole app. Firebase is loaded only when it's configured, as a separate chunk,
 // so readers who never sign in don't download it.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -92,6 +93,7 @@ function testUser(name: string, email: string, provider: AuthUser['provider']): 
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<AuthUser | null>(testAuth?.user ? testUser(testAuth.user.name, 'reader@example.com', 'google') : null);
   const [ready, setReady] = useState(Boolean(testAuth) || !firebaseConfigured);
   const [fb, setFb] = useState<Awaited<ReturnType<typeof loadFirebase>> | null>(null);
@@ -102,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadFirebase().then((loaded) => {
       setFb(loaded);
       unsubscribe = loaded.lib.onAuthStateChanged(loaded.auth, (u) => {
+        void queryClient.cancelQueries();
+        queryClient.clear();
         setUser(u ? toAuthUser(u) : null);
         setReady(true);
       });
@@ -140,6 +144,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [fb]);
 
   const signOut = useCallback(async () => {
+    // Remove this browser's notification subscription before another account uses it.
+    if (fb?.auth.currentUser) {
+      const { disablePush } = await import('./push');
+      try { await disablePush(await fb.auth.currentUser.getIdToken()); }
+      catch {
+        // Stop local delivery even when the server is temporarily unavailable.
+        const sub = await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription();
+        await sub?.unsubscribe();
+      }
+    }
+    void queryClient.cancelQueries();
+    queryClient.clear();
     if (testAuth) return setUser(null);
     if (fb) await fb.lib.signOut(fb.auth);
   }, [fb]);

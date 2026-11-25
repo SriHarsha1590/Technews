@@ -1,3 +1,4 @@
+import { InstallApp } from './ReaderPages';
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth, type AuthUser } from '../auth';
@@ -45,6 +46,7 @@ export function ProfilePage({ user }: { user: AuthUser }) {
 
       <StackSettings />
       <DigestSettings />
+      <InstallApp />
 
       <section className="settings-section" aria-labelledby="account-title">
         <h3 id="account-title">Account</h3>

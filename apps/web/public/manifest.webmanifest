@@ -1,0 +1,11 @@
+{
+  "id": "/",
+  "name": "TechNews",
+  "short_name": "TechNews",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#faf8f4",
+  "theme_color": "#2F5BEA",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

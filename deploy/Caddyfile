@@ -1,6 +1,16 @@
-# HTTPS certificates are fetched and renewed automatically. DOMAIN comes from .env.production.
 {$DOMAIN} {
   encode gzip zstd
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    X-Frame-Options "DENY"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    -Server
+  }
+  handle /api/v1/metrics {
+    respond 404
+  }
   handle /api/* {
     reverse_proxy api:4000
   }

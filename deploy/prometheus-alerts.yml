@@ -1,0 +1,33 @@
+groups:
+  - name: technews-api
+    rules:
+      - alert: TechNewsPublicAiCap
+        expr: increase(technews_api_public_ai_cap_hits_total[15m]) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: Public AI allocation exhausted in the last 15 minutes
+      - alert: TechNewsPublicAiRateLimited
+        expr: sum(increase(technews_api_rate_limit_total{scope=~".*ai.*"}[15m])) > 10
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: Public AI rate limits exceeded 10 in 15 minutes
+      - alert: TechNewsFeedStale
+        expr: time() - technews_api_feed_latest_story_timestamp_seconds > 1200
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: Newest feed card is more than 20 minutes old
+      - alert: TechNewsApiErrors
+        expr: sum(increase(technews_api_errors_total[5m])) > 10
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: API errors exceeded 10 in five minutes
+      - alert: TechNewsApiMetricsMissing
+        expr: absent(technews_api_requests_total)
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: API metrics stream is missing

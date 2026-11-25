@@ -6,18 +6,18 @@ The **Try it** button opens a sheet with up to four ways to start using what the
 |---|---|---|
 | playground | Try it online | platform.openai.com/playground, a Hugging Face Space |
 | download | Download | chatgpt.com/download |
-| repo | View the code | github.com/openai/astra, an npm or PyPI page |
+| repo | View the code | github.com/openai/astra |
 | docs | Read the docs | the getting-started guide |
 
 Every link is **copied from a source page** and **verified by code** before anyone sees it. If nothing passes,
 the button stays disabled. That's on purpose: a missing link is better than a fake download page.
-Part 2 (a later guide) adds step-by-step guides that are tested in a sandbox.
+The sheet also shows AI-written steps based on the article. Readers should check those steps against official docs.
 
 ---
 
 ## Step 1: The pipeline
 
-A new workflow, `tryLinksWorkflow`, runs every 15 minutes:
+The pipeline's `refreshWorkflow` finds Try it links for new and recently missed stories every 5 minutes:
 
 1. **`loadStoriesNeedingTryLinks`** takes up to 15 stories from the last 72 hours that haven't been searched yet.
 2. **`collectLinkCandidates`** fetches up to two source pages per story (official ones first) and pulls out
@@ -43,10 +43,10 @@ These rules are the safety boundary. The AI suggests; code decides.
 2. **Found on an official page** (e.g. OpenAI's own announcement): the link must stay on that company's own
    sites. Each official source lists them in `sources.ts` as `ownDomains`, e.g. GitHub owns `github.blog` and
    `github.com`, Google owns `blog.google`, `google.com`, `google.dev`, `deepmind.google`.
-3. **Code hosts** (github.com, gitlab.com, huggingface.co, npmjs.com, pypi.org) are allowed for code,
-   playgrounds and docs, but **never for downloads**, because anyone can publish there.
+3. **Code hosts** (github.com, gitlab.com, huggingface.co, npmjs.com, pypi.org) host user content. Only
+   known vendor namespaces are accepted for code, playgrounds and docs, and never for downloads.
 4. **Found on a press or community page:** allowed only to a known vendor's own site (any official source's
-   `ownDomains`) or a code host, and **never as a download**.
+   `ownDomains`) or a known vendor namespace on a code host, and **never as a download**.
 
 Sites are compared by their **registrable domain** using the `tldts` library: `docs.github.com` belongs to
 `github.com`, while `openai.com.evil.io` belongs to `evil.io` and `openai-download.com` is its own site.
@@ -62,8 +62,8 @@ site is theirs. Adding their blog as an official source (with `ownDomains`) fixe
 1. Request the link without following redirects automatically.
 2. If it redirects, check the new address against the same trust rules, then follow it (up to 5 hops).
    A redirect from an official page to another site fails the check.
-3. **Passes:** 2xx, plus 401/403/429. Many sites block bots this way even though the page exists.
-4. **Fails:** 404, 410, 5xx, timeouts, too many redirects.
+3. **Passes:** only 2xx responses from the trusted destination.
+4. **Fails:** 401/403/429, 404, 410, 5xx, timeouts, unsafe DNS answers, too many redirects.
 
 The saved URL is where the redirects ended, and `domain` is what the sheet shows ("Opens platform.openai.com").
 
@@ -89,10 +89,10 @@ npm run typecheck
 npm test
 ```
 
-Expected: shared 2, API 9, web 2, worker 20.
+The suite should pass; test counts change as checks are added.
 
 New worker tests cover the trust rules (official, press, code hosts, lookalike domains, http), link
-extraction, the link check (redirects on and off site, dead vs bot-blocked pages) and pick verification
+extraction, the link check (redirects on and off site, successful vs bot-blocked pages) and pick verification
 (fallback to the next pick, numbers the AI made up).
 
 ---
@@ -120,7 +120,7 @@ Run it a few times; each run takes the next 15 unsearched stories. Then add the 
 npm run schedules
 ```
 
-It creates `try-links` (every 15 minutes) and `recheck-try-links` (daily) and leaves existing schedules alone.
+The worker already ensures the `pipeline` schedule (every 5 minutes) and `recheck-try-links` (daily) on startup.
 
 **See what was saved:**
 
@@ -158,4 +158,4 @@ shows the domain and check time, and closes with Escape and with the Close butto
 | A good link was rejected as "not an allowed site" | The company owns a domain missing from `ownDomains` | Add it to that source in `sources.ts`, then re-run |
 | A story was searched before its official post arrived | Stories are searched once | Later coverage is attached to the story, but links aren't re-searched yet (planned) |
 | Try it disabled on older stories | Saved before this milestone | `npm run try-links` searches stories from the last 72 hours |
-| `capped: true` | Daily AI cap reached (shared with summaries) | Waits until tomorrow; raise `LLM_DAILY_CAP` if needed |
+| `capped: true` | Worker AI cap reached | Waits until tomorrow; review `WORKER_LLM_DAILY_CAP` and usage before raising it |

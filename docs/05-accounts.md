@@ -146,6 +146,10 @@ New tests cover:
 
 ## Limits to know about
 
+Saved bookmarks keep a card snapshot after the story itself expires. Each reader can keep up to 500 bookmarks,
+2,000 history entries and 20 push subscriptions; the oldest entry is removed when a limit is exceeded.
+Push subscriptions are accepted only for known browser push-service hosts.
+
 | Limit | Why | When it's solved |
 |---|---|---|
 | Notifications need **https** (or `localhost`) | Browsers only allow push on secure sites | When the app is online with https (beta step) |

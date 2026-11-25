@@ -11,7 +11,7 @@ export class DailyCapReached extends Error {}
 /** Counts every AI call per UTC day in Redis and refuses once LLM_DAILY_CAP is hit. */
 async function takeDailyBudget(): Promise<void> {
   const redis = await getRedis();
-  const key = `llm:calls:${new Date().toISOString().slice(0, 10)}`;
+  const key = `llm:worker:calls:${new Date().toISOString().slice(0, 10)}`;
   const used = await redis.incr(key);
   if (used === 1) await redis.expire(key, 2 * 24 * 3600);
   if (used > config.llmDailyCap) throw new DailyCapReached(`LLM daily cap of ${config.llmDailyCap} reached`);

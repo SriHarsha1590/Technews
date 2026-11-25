@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { AdminPage, WelcomePage, StoryPage } from './components/ReaderPages';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { FEED_NAMES, type FeedName, type StoryCard } from '@technews/shared';
 import { useAuth } from './auth';
-import { fetchFeed, fetchForYou, fetchMe } from './api';
+import { fetchCapabilities, fetchFeed, fetchForYou, fetchMe } from './api';
 import { CATEGORY_LABEL } from './format';
 import { useFreshOnReturn, useReadTracking } from './history';
 import { Link, navigate, signInHref, useLocation } from './router';
 import { ViewTabs, type Tab } from './components/ViewTabs';
-import { Feed } from './components/Feed';
+import { Feed, type PageResult } from './components/Feed';
 import { AskPanel } from './components/AskPanel';
-import { RefreshButton } from './components/RefreshButton';
 import { AccountMenu } from './components/AccountMenu';
 import { SignInPage } from './components/SignInPage';
 import { SavedPage } from './components/SavedPage';
@@ -33,17 +33,32 @@ function viewHref(view: View): string {
 }
 
 export function App() {
+  const queryClient = useQueryClient();
   const auth = useAuth();
   const { user, token } = auth;
   const { page, params, href } = useLocation();
   const view = readView(params);
+  const activeView = useRef(view);
+  activeView.current = view;
   const [stories, setStories] = useState<StoryCard[]>([]); // the cards shown in the current view: Ask's context
   const [askOpen, setAskOpen] = useState(false);
   const [focus, setFocus] = useState<StoryCard | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0); // bumped each time a Refresh run publishes new cards
-  const refreshed = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const [refreshKey, setRefreshKey] = useState(0); // reload the latest cards already published by the pipeline
+  const refreshVersion = useRef(0);
+  const [refreshingStories, setRefreshingStories] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState('');
+  const refreshing = useRef(false);
+  const refreshed = useCallback(() => {
+    refreshVersion.current += 1;
+    setRefreshKey(refreshVersion.current);
+  }, []);
   const reads = useReadTracking();
   useFreshOnReturn(refreshed);
+  useEffect(() => {
+    if (!refreshMessage) return;
+    const timer = setTimeout(() => setRefreshMessage(''), 6000);
+    return () => clearTimeout(timer);
+  }, [refreshMessage]);
 
   // Old links to the Saved tab (?view=saved) open the Saved page.
   useEffect(() => {
@@ -69,9 +84,50 @@ export function App() {
 
   const me = useQuery({ queryKey: ['me', user?.uid], queryFn: async () => fetchMe(await token()), enabled: Boolean(user) });
   const stack = me.data?.stack ?? [];
+  const capabilities = useQuery({ queryKey: ['capabilities', user?.uid], queryFn: async () => fetchCapabilities(await token()), enabled: Boolean(user) });
+  useEffect(() => {
+    if (page === 'story') return; // StoryPage uses the fetched headline once available.
+    const title = page === 'feed' ? (view === 'foryou' ? 'For you' : `${CATEGORY_LABEL[view]} stories`)
+      : page === 'saved' ? 'Saved stories'
+      : page === 'history' ? 'Reading history'
+      : page === 'profile' ? 'Profile'
+      : page === 'signin' ? 'Sign in'
+      : page === 'admin' ? 'Admin dashboard'
+      : 'Welcome';
+    document.title = `${title} · TechNews`;
+  }, [page, view]);
+  const refreshStories = async () => {
+    if (refreshing.current || (view === 'foryou' && !user)) return;
+    refreshing.current = true;
+    setRefreshingStories(true);
+    setRefreshMessage('');
+    const currentKey = view === 'foryou' ? ['foryou', user!.uid, stack, refreshKey] : ['feed', view, refreshKey];
+    const previous = queryClient.getQueryData<InfiniteData<PageResult>>(currentKey)?.pages[0]?.data.map((story) => story.id);
+    try {
+      const latest = view === 'foryou' ? await fetchForYou(await token()) : await fetchFeed(view, undefined, true);
+      if (activeView.current !== view) return; // the reader switched tabs while this request was in flight
+      const nextKey = refreshVersion.current + 1;
+      const nextQueryKey = view === 'foryou' ? ['foryou', user!.uid, stack, nextKey] : ['feed', view, nextKey];
+      queryClient.setQueryData<InfiniteData<PageResult>>(nextQueryKey, { pages: [latest], pageParams: [undefined] });
+      refreshed();
+      const current = latest.data.map((story) => story.id);
+      setRefreshMessage(previous && previous.length === current.length && previous.every((id, i) => id === current[i])
+        ? "You're up to date."
+        : 'Latest stories loaded.');
+    } catch {
+      setRefreshMessage('Could not check for new stories. Try again.');
+    } finally {
+      refreshing.current = false;
+      setRefreshingStories(false);
+    }
+  };
+  useEffect(() => {
+    if (user && me.isSuccess && !stack.length && page === 'feed' && !localStorage.getItem(`welcome:${user.uid}`)) navigate('/welcome');
+  }, [user, me.isSuccess, stack.length, page]);
 
   const change = (id: string) => {
     setFocus(null);
+    setRefreshMessage('');
     navigate(viewHref(id as View), { replace: true });
   };
 
@@ -81,7 +137,9 @@ export function App() {
   ];
 
   let content: ReactNode;
-  if (page === 'signin') {
+  if (page === 'story') {
+    content = <StoryPage id={params.get('id') ?? ''} />;
+  } else if (page === 'signin') {
     content = <div className="scroll"><SignInPage next={params.get('next')} /></div>;
   } else if (page !== 'feed') {
     // Saved, History and Profile belong to an account: signed-out readers get the sign-in page right here.
@@ -90,7 +148,9 @@ export function App() {
     else if (!user) inner = <SignInPage next={href} />;
     else if (page === 'saved') inner = <SavedPage user={user} />;
     else if (page === 'history') inner = <HistoryPage user={user} filter={params.get('filter') === 'watched' ? 'watched' : 'all'} />;
-    else inner = <ProfilePage user={user} />;
+    else if (page === 'welcome') inner = <WelcomePage />;
+    else if (page === 'admin') inner = capabilities.data?.admin ? <AdminPage /> : <p className="page">Administrator access required.</p>;
+    else inner = <ProfilePage key={user.uid} user={user} />;
     content = <div className="scroll">{inner}</div>;
   } else if (isCategory(view)) {
     const name = view === 'all' ? '' : `${CATEGORY_LABEL[view]} `;
@@ -103,7 +163,7 @@ export function App() {
         empty={
           <>
             <p>No {name}stories yet.</p>
-            <p className="hint">New stories are added every 5 minutes. Reload the page to see them, or press Refresh to fetch them now.</p>
+            <p className="hint">The news pipeline checks sources every 5 minutes. Press Refresh stories to check for newly published cards.</p>
           </>
         }
         {...listProps}
@@ -151,7 +211,13 @@ export function App() {
           <div className="topbar-actions">
             {page === 'feed' && (
               <>
-                <RefreshButton onUpdate={refreshed} />
+                <div className="reader-refresh">
+                  <button type="button" className="ask-top" onClick={() => void refreshStories()} disabled={refreshingStories} aria-label="Refresh stories" title="Check for stories already published by the news pipeline">
+                    <Icon name="replay" />
+                    Refresh stories
+                  </button>
+                  <span className="reader-refresh-note" role="status">{refreshingStories ? 'Checking stories…' : refreshMessage}</span>
+                </div>
                 <button type="button" className="ask-top" aria-haspopup="dialog" onClick={() => openAsk()}>
                   <Icon name="ask" />
                   Ask the feed
@@ -159,7 +225,7 @@ export function App() {
               </>
             )}
             {auth.enabled && auth.ready && (user ? (
-              <AccountMenu user={user} />
+              <AccountMenu user={user} admin={capabilities.data?.admin ?? false} />
             ) : (
               page !== 'signin' && <Link className="signin" href={signInHref()}>Sign in</Link>
             ))}

@@ -19,6 +19,31 @@ const story = (n: number, tags: string[] = ['react']): StoryCard => ({
 });
 const all = [story(1), story(2, ['vite']), story(3)];
 
+test('first visit guides a reader through topics and allows skipping', async ({ page }) => {
+  await setup(page, { signedIn: true, fresh: true });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Make TechNews yours' })).toBeVisible();
+  await page.getByRole('link', { name: 'Skip for now' }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test('ordinary readers cannot see administrator controls', async ({ page }) => {
+  await setup(page, { signedIn: true });
+  await page.goto('/admin');
+  await expect(page.getByText('Administrator access required.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run news pipeline', exact: true })).toHaveCount(0);
+});
+
+test('administrators see service health and pipeline controls', async ({ page }) => {
+  await setup(page, { signedIn: true });
+  await page.route('**/me/capabilities', (route) => route.fulfill({ json: { data: { admin: true } } }));
+  await page.route('**/me/admin', (route) => route.fulfill({ json: { data: { mongo: true, redis: true, pipeline: { state: 'idle', startedAt: null, finishedAt: null }, feedVersion: null } } }));
+  await page.goto('/admin');
+  await expect(page.getByRole('heading', { name: 'Admin dashboard' })).toBeVisible();
+  await expect(page.getByText('MongoDB', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run news pipeline', exact: true })).toBeVisible();
+});
+
 interface Backend {
   me: Me;
   saved: string[];
@@ -26,16 +51,17 @@ interface Backend {
   calls: { method: string; path: string; auth: string | null; body: unknown }[];
 }
 
-async function setup(p: Page, opts: { signedIn: boolean; stack?: string[]; saved?: string[]; history?: HistoryEntry[] }) {
+async function setup(p: Page, opts: { signedIn: boolean; fresh?: boolean; stack?: string[]; saved?: string[]; history?: HistoryEntry[] }) {
   const be: Backend = {
     me: { uid: 'test-user', stack: opts.stack ?? [], digest: { enabled: false, hour: 8, timeZone: 'UTC' } },
     saved: opts.saved ?? [],
     history: opts.history ?? [],
     calls: [],
   };
-  await p.addInitScript((signedIn) => {
+  await p.addInitScript(({ signedIn, fresh }) => {
+    if (!fresh) localStorage.setItem('welcome:test-user', 'done');
     window.__TECHNEWS_TEST_AUTH__ = { user: signedIn ? { uid: 'test-user', name: 'Test Reader' } : null };
-  }, opts.signedIn);
+  }, { signedIn: opts.signedIn, fresh: opts.fresh ?? false });
 
   await p.route('**/api/v1/**', async (route: Route) => {
     const req = route.request();
@@ -49,6 +75,7 @@ async function setup(p: Page, opts: { signedIn: boolean; stack?: string[]; saved
     if (path === '/feed') return json({ data: all, meta: { nextCursor: null, servedFrom: 'redis' } });
     if (path === '/tags/popular') return json({ data: [{ tag: 'react', count: 5 }, { tag: 'vite', count: 3 }] });
     if (path === '/me') return json({ data: be.me });
+    if (path === '/me/capabilities') return json({ data: { admin: false } });
     if (path === '/me/stack') {
       be.me.stack = body.stack;
       return json({ data: { stack: body.stack } });

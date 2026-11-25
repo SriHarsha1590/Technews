@@ -18,6 +18,8 @@ export function useReadTracking() {
   const qc = useQueryClient();
   const sent = useRef(new Map<string, boolean>()); // story id -> watched, already recorded this visit
 
+  useEffect(() => { sent.current.clear(); }, [user?.uid]);
+
   const readIds = useQuery({
     queryKey: ['read-ids', user?.uid],
     queryFn: async () => new Set(await fetchReadIds(await token())),

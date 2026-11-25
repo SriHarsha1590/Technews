@@ -22,6 +22,10 @@ test('official page: links to the company own sites are allowed, including downl
 test('official page: code hosts allowed for repos, but never for downloads', () => {
   assert.ok(isTrustedLink(u('https://github.com/openai/astra'), 'repo', openaiPage));
   assert.ok(!isTrustedLink(u('https://github.com/openai/astra/releases/download/v1/astra.exe'), 'download', openaiPage));
+  assert.ok(!isTrustedLink(u('https://github.com/attacker/astra'), 'repo', openaiPage));
+  assert.ok(!isTrustedLink(u('https://github.com/attacker/astra'), 'repo', githubPage));
+  assert.ok(!isTrustedLink(u('https://gist.github.com/attacker/abc123'), 'repo', openaiPage));
+  assert.ok(!isTrustedLink(u('https://www.github.com/attacker/astra'), 'repo', openaiPage));
 });
 
 test('lookalike and unrelated domains are rejected', () => {
@@ -32,7 +36,8 @@ test('lookalike and unrelated domains are rejected', () => {
 
 test('press page: only known vendor sites and code hosts, never downloads', () => {
   assert.ok(isTrustedLink(u('https://platform.openai.com/docs'), 'docs', pressPage));
-  assert.ok(isTrustedLink(u('https://huggingface.co/spaces/x/demo'), 'playground', pressPage));
+  assert.ok(isTrustedLink(u('https://huggingface.co/spaces/huggingface/demo'), 'playground', pressPage));
+  assert.ok(!isTrustedLink(u('https://huggingface.co/spaces/x/demo'), 'playground', pressPage));
   assert.ok(!isTrustedLink(u('https://chatgpt.com/download'), 'download', pressPage));
   assert.ok(!isTrustedLink(u('https://some-startup.ai/try'), 'playground', pressPage)); // can't verify who owns it
 });

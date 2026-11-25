@@ -1,6 +1,7 @@
 import Parser from 'rss-parser';
 import { log } from '@temporalio/activity';
 import { RETENTION_DAYS, type Article, type Source } from '@technews/shared';
+import { safeFetchFeed } from '@technews/shared/safe-fetch';
 import { SOURCES } from '../sources';
 import { articles } from '../db';
 import { articleId } from '../url';
@@ -44,7 +45,9 @@ export async function listSources(): Promise<Source[]> {
 
 /** Fetch one feed and save new items. Fetch + save in one activity keeps article text out of workflow history. */
 export async function ingestSource(source: Source): Promise<IngestResult> {
-  const feed = await parser.parseURL(source.url);
+  const xml = await safeFetchFeed(source.url, { userAgent: USER_AGENT, timeoutMs: 20_000 });
+  if (!xml) throw new Error(`Feed unavailable: ${source.id}`);
+  const feed = await parser.parseString(xml);
   const now = new Date();
   const oldest = now.getTime() - RETENTION_DAYS * 86_400_000;
   const docs: Article[] = [];
@@ -53,6 +56,8 @@ export async function ingestSource(source: Source): Promise<IngestResult> {
     if (!item.link || !item.title) continue;
     let id: string;
     try {
+      const url = new URL(item.link);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) continue;
       id = articleId(item.link);
     } catch {
       continue; // malformed link in the feed

@@ -1,0 +1,24 @@
+# Loki ruler rules. Map Docker Fluentd tags to the `service` label in the log collector.
+# Configure Alertmanager routing separately; these thresholds should be reviewed after baseline traffic.
+groups:
+  - name: technews
+    interval: 1m
+    rules:
+      - alert: TechNewsPipelineFailed
+        expr: sum(count_over_time({service="worker"} | json | event="pipeline_failed" [15m])) > 0
+        for: 0m
+        labels: { severity: critical }
+        annotations:
+          summary: Pipeline failed in the last 15 minutes
+      - alert: TechNewsWorkerAiCap
+        expr: sum(count_over_time({service="worker"} | json | event="pipeline_ai_cap" [15m])) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations:
+          summary: Worker AI allocation exhausted
+      - alert: TechNewsPipelineStale
+        expr: absent_over_time({service="worker"} | json | event="pipeline_completed" [20m])
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: No successful pipeline completion for 20 minutes

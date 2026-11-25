@@ -1,6 +1,6 @@
 // Starts the worker's refreshWorkflow (scrape -> summarize -> Try it links) and reports on it.
 // The API never runs the pipeline itself: it only asks Temporal to, and the worker does the work.
-import { Client, Connection, WorkflowNotFoundError } from '@temporalio/client';
+import { Client, Connection, ScheduleNotFoundError, ScheduleOverlapPolicy, WorkflowNotFoundError } from '@temporalio/client';
 import { loadClientConnectConfig } from '@temporalio/envconfig';
 import type { RefreshStatus } from '@technews/shared';
 
@@ -13,10 +13,8 @@ export interface Refresher {
   status(): Promise<RunStatus>;
 }
 
-const WORKFLOW_ID = 'refresh'; // one id: a second click while one is running joins it instead of starting another
-const WORKFLOW_TYPE = 'refreshWorkflow'; // apps/worker/src/workflows.ts
-const TASK_QUEUE = 'technews'; // keep in sync with the worker's config.ts
-const UNAVAILABLE = 'Refresh is unavailable: Temporal is not reachable.';
+const SCHEDULE_ID = 'pipeline'; // created by the worker; one source of truth for scheduled and button-triggered runs
+const UNAVAILABLE = 'Refresh is unavailable: the pipeline schedule or Temporal is not reachable.';
 
 export function temporalRefresher(): Refresher {
   let client: Promise<Client> | undefined;
@@ -32,11 +30,16 @@ export function temporalRefresher(): Refresher {
 
   async function status(): Promise<RunStatus> {
     try {
-      const d = await (await getClient()).workflow.getHandle(WORKFLOW_ID).describe();
+      const temporal = await getClient();
+      const schedule = await temporal.schedule.getHandle(SCHEDULE_ID).describe();
+      const active = schedule.info.runningActions.at(-1);
+      const latest = active ?? schedule.info.recentActions.at(-1)?.action;
+      if (!latest) return { state: 'idle', startedAt: null, finishedAt: null };
+      const d = await temporal.workflow.getHandle(latest.workflow.workflowId).describe();
       const state = d.status.name === 'RUNNING' ? 'running' : d.status.name === 'COMPLETED' ? 'completed' : 'failed';
       return { state, startedAt: d.startTime.toISOString(), finishedAt: d.closeTime?.toISOString() ?? null };
     } catch (err) {
-      if (err instanceof WorkflowNotFoundError) return { state: 'idle', startedAt: null, finishedAt: null };
+      if (err instanceof WorkflowNotFoundError || err instanceof ScheduleNotFoundError) return { state: 'idle', startedAt: null, finishedAt: null };
       throw new RefreshUnavailable(UNAVAILABLE);
     }
   }
@@ -44,16 +47,19 @@ export function temporalRefresher(): Refresher {
   return {
     async start() {
       try {
-        await (await getClient()).workflow.start(WORKFLOW_TYPE, {
-          workflowId: WORKFLOW_ID,
-          taskQueue: TASK_QUEUE,
-          workflowIdConflictPolicy: 'USE_EXISTING',
-          workflowExecutionTimeout: '20 minutes', // worker down: the button stops spinning eventually
-        });
+        const before = await status();
+        await (await getClient()).schedule.getHandle(SCHEDULE_ID).trigger(ScheduleOverlapPolicy.SKIP);
+        // A trigger is accepted before its workflow appears in recentActions.
+        // Wait briefly so the button sees the new run and keeps polling it.
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const current = await status();
+          if (current.state === 'running' || current.startedAt !== before.startedAt) return current;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return status();
       } catch {
         throw new RefreshUnavailable(UNAVAILABLE);
       }
-      return status();
     },
     status,
   };
